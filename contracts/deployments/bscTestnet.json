@@ -1,0 +1,8 @@
+{
+  "address": "0x6fb61263bbc19b10eb1a60ade0ea825769e26b42",
+  "chainId": 97,
+  "block": 144934563,
+  "txHash": "0x4036ff8f874fc929bf37b8fec43ee8b83463dd3a7f1a4c9e5a264fc108f00036",
+  "operator": "0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E",
+  "abi": "artifacts/contracts/Scorecard.sol/Scorecard.json"
+}

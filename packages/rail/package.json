@@ -1,0 +1,27 @@
+{
+  "name": "cutline-rail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "tsx --test test/local.test.ts test/yellow.test.ts",
+    "test:live": "tsx --test test/*.live.test.ts",
+    "spike": "tsx scripts/spike.ts",
+    "probe:mainnet": "tsx scripts/probe-mainnet.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@yellow-org/sdk": "1.4.0",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^18.0.10",
+    "viem": "^2.58.6",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

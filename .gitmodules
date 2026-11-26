@@ -1,0 +1,3 @@
+[submodule "packages/data/vendor/cournot-skills"]
+	path = packages/data/vendor/cournot-skills
+	url = https://github.com/Cournot-AI/cournot-skills
