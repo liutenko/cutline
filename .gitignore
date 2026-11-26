@@ -8,3 +8,5 @@ data/recordings/*.jsonl
 artifacts/
 cache/
 .DS_Store
+.vercel
+.gstack/
