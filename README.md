@@ -254,15 +254,29 @@ The settled round: four vault transactions and the scorecard link.
 2. **Next 90 days.** Open evaluation as an agent skill, live execution on BNB Chain DEXs, and a first desk run by a sponsor with its own money.
 3. **Agent sources (roadmap, not built).** Agents built with BNB Agent Studio or any framework would apply to the desk through the same order interface.
 4. **State channels (roadmap, not built).** Move allocation updates off-chain over state channels, so capital moves between agents instantly and without gas, with the vault as the on-chain anchor.
-5. **Later.** More desks sharing one scorecard standard, and a licensed structure before any outside capital.
+5. **Open vault (roadmap, not built).** Anyone can deposit and back the desk, not a single agent. The loss per agent is capped by the contract, and evaluation fees fill a loss reserve that takes the first loss. It needs a legal structure first. Until then each desk has one capital owner.
+6. **Later.** More desks sharing one scorecard standard.
 
 ## How this becomes a business
 
 1. A desk is software. One capital owner (an exchange, a chain foundation, a DEX, a tokenized-asset issuer, a treasury) runs a desk with its own money. We supply the evaluation, the risk manager, the cut, the settlement and the scorecard.
-2. No public pool. We do not take deposits from the public. Outside capital means another capital owner running its own desk, or later a licensed structure.
+2. Today each desk has one capital owner, with its own money. The open vault, where anyone can deposit, is the next step and is not built. Taking deposits from the public to trade is fund management in most places, so it launches only with a legal structure and legal advice.
 3. The desk bears trading losses, capped by code at the drawdown limit per agent. The builder risks only the evaluation fee.
 4. The fee is a screening price, not the profit engine. It is set so that a coin-flipping agent loses money.
 5. The split slides. 80 percent to the agent applies to the small entry tier. As allocations grow, more of the profit goes to the capital owner.
+
+### Business model (proposed terms, not built)
+
+Starting proposals, to be tuned once real agent data exists. None of this is implemented: the build has no evaluation fees, no depositor shares and no loss reserve.
+
+| Flow | Terms | Where it goes |
+|---|---|---|
+| Evaluation fee | $40 for a $2,000 slot, priced so that a coin-flipping agent loses money | 75 percent to the loss reserve, 25 percent to the protocol |
+| Profit split | Agent keeps 80 percent on a $2,000 slot, 50 percent on $20,000, 30 percent on $100,000 | The rest goes to the vault |
+| Performance fee | 10 percent of the vault's share of profit, only on profit | Protocol |
+| Desk software | A sponsor runs its own desk: setup fee plus 20 percent of that desk's evaluation fees | Protocol |
+
+There is no management fee, and no fee to deposit or withdraw. On human prop-firm benchmarks, a $150,000 vault with 2,000 evaluations in a year would bring the protocol about $20,000, so the business depends on many desks and on agents reaching the upper tiers.
 
 Where this sits: exchange-run prop programs exist for human traders, and they are built for manual trading. BNB Chain has agent tooling and trading contests, and a prize pool is spent once. This desk is the capital step for BNB Chain, with a track record that records risk as well as profit.
 

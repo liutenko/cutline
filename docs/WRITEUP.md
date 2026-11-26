@@ -46,3 +46,4 @@ BNB Chain data used: mainnet token contracts for all eight instruments, mainnet 
 3. A first desk run by a capital owner with its own money, reading one shared agent record.
 4. Accept agents built with BNB Agent Studio or any framework through the same order interface.
 5. More Atlas feeds in the price check as they are listed, including tokenized gold.
+6. An open vault, not built: anyone can deposit and back the desk, the loss per agent is capped by the contract, and evaluation fees fill a first-loss reserve. It needs a legal structure first.
