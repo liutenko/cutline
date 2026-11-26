@@ -21,6 +21,7 @@ import {
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import type { Hex, RailParticipant, RailReceipt, RailState, SettlementRail } from '../../../shared/src/types.js';
 import { deskVaultAbi, testUsdAbi } from '../../../contracts/src/vaultAbi.js';
+import { DESK_FUND_ABI } from '../../../contracts/src/fundAbi.js';
 import { normalizeAllocations, parseAmount, validateParticipants } from './amounts.js';
 
 export type Env = Record<string, string | undefined>;
@@ -30,6 +31,19 @@ export const BSC_TESTNET_CHAIN_ID = 97;
 export const DEFAULT_TESTNET_RPC = 'https://data-seed-prebsc-1-s1.bnbchain.org:8545';
 export const TESTNET_EXPLORER = 'https://testnet.bscscan.com';
 export const DEPLOYMENT_FILE = fileURLToPath(new URL('../../../contracts/deployments/bscTestnet-vault.json', import.meta.url));
+/** DeskFund deployment: depositors' capital funds the rounds of a second DeskVault whose desk is the DeskFund contract. */
+export const FUND_DEPLOYMENT_FILE = fileURLToPath(new URL('../../../contracts/deployments/bscTestnet-fund.json', import.meta.url));
+
+function readFundDeployment(): { fund?: Hex; vault?: Hex } {
+  if (!existsSync(FUND_DEPLOYMENT_FILE)) return {};
+  try {
+    const d = JSON.parse(readFileSync(FUND_DEPLOYMENT_FILE, 'utf8'));
+    const pick = (v: unknown): Hex | undefined => (typeof v === 'string' ? (v as Hex) : (v as { address?: Hex } | undefined)?.address);
+    return { fund: pick(d.deskFund ?? d.fund ?? d.DeskFund), vault: pick(d.deskVault ?? d.vault ?? d.DeskVault) };
+  } catch {
+    return {};
+  }
+}
 
 /** Participant id -> bytes32, keccak256 of the UTF-8 id (same scheme as the Scorecard client). */
 export const idToBytes32 = (id: string): Hex => keccak256(toBytes(id));
@@ -102,6 +116,8 @@ export class VaultRail implements SettlementRail {
   readonly name = 'bnb-testnet-vault' as const;
   readonly vault: Hex;
   readonly token: Hex;
+  /** DeskFund address when depositor capital funds the rounds (DESK_FUND=1); null for the desk-funded vault. */
+  readonly fund: Hex | null;
   readonly chainId: number;
   readonly explorer: string | null;
   private readonly confirmations: number;
@@ -121,7 +137,11 @@ export class VaultRail implements SettlementRail {
     this.desk = privateKeyToAccount(normKey(env.DESK_KEY, 'DESK_KEY'));
     this.risk = privateKeyToAccount(normKey(env.RISK_KEY, 'RISK_KEY'));
     const dep = readDeployment();
-    const vault = opts.vault ?? (env.VAULT_ADDRESS?.trim() as Hex | undefined) ?? dep.vault;
+    const useFund = /^(1|true|yes)$/i.test(env.DESK_FUND?.trim() ?? '');
+    const fd = useFund ? readFundDeployment() : {};
+    if (useFund && (!fd.fund || !fd.vault)) throw new Error(`DESK_FUND=1 but no DeskFund deployment in ${FUND_DEPLOYMENT_FILE}`);
+    this.fund = useFund ? fd.fund! : null;
+    const vault = useFund ? fd.vault : (opts.vault ?? (env.VAULT_ADDRESS?.trim() as Hex | undefined) ?? dep.vault);
     const token = opts.token ?? (env.TEST_USD_ADDRESS?.trim() as Hex | undefined) ?? dep.token;
     if (!vault || !/^0x[0-9a-fA-F]{40}$/.test(vault)) throw new Error(`missing VAULT_ADDRESS (and none in ${DEPLOYMENT_FILE})`);
     if (!token || !/^0x[0-9a-fA-F]{40}$/.test(token)) throw new Error(`missing TEST_USD_ADDRESS (and none in ${DEPLOYMENT_FILE})`);
@@ -197,7 +217,7 @@ export class VaultRail implements SettlementRail {
       const finalAlloc = s.allocations.map((_, i) => (i === 0 ? s.pot : 0n));
       const version = s.version + 1n;
       const sig = await this.signRisk('CloseRound', s.roundId, version, finalAlloc);
-      const info = await this.send('close-stale', 'closeRound', [s.roundId, version, finalAlloc, sig]);
+      const info = await this.send('close-stale', 'closeRound', [s.roundId, version, finalAlloc, sig], this.fund ?? this.vault);
       if (this.st && this.st.status === 'open') this.st.status = 'closed';
       return { roundId: s.roundId, receipt: info };
     });
@@ -234,7 +254,11 @@ export class VaultRail implements SettlementRail {
       this.pub.readContract({ ...c, functionName: 'riskManager' }),
       this.pub.readContract({ ...c, functionName: 'token' }),
     ]);
-    if (desk.toLowerCase() !== this.desk.address.toLowerCase()) throw new Error(`vault desk is ${desk}, but DESK_KEY is ${this.desk.address}`);
+    if (this.fund) {
+      if (desk.toLowerCase() !== this.fund.toLowerCase()) throw new Error(`vault desk is ${desk}, but DeskFund is ${this.fund}`);
+      const op = (await this.pub.readContract({ address: this.fund, abi: DESK_FUND_ABI, functionName: 'operator' } as never)) as Hex;
+      if (op.toLowerCase() !== this.desk.address.toLowerCase()) throw new Error(`DeskFund operator is ${op}, but DESK_KEY is ${this.desk.address}`);
+    } else if (desk.toLowerCase() !== this.desk.address.toLowerCase()) throw new Error(`vault desk is ${desk}, but DESK_KEY is ${this.desk.address}`);
     if (risk.toLowerCase() !== this.risk.address.toLowerCase()) throw new Error(`vault risk manager is ${risk}, but RISK_KEY is ${this.risk.address}`);
     if (token.toLowerCase() !== this.token.toLowerCase()) throw new Error(`vault token is ${token}, but TEST_USD_ADDRESS is ${this.token}`);
     this.checked = true;
@@ -251,7 +275,9 @@ export class VaultRail implements SettlementRail {
     if (desk.address.toLowerCase() !== this.desk.address.toLowerCase()) {
       throw new Error(`desk participant address ${desk.address} does not match DESK_KEY (${this.desk.address})`);
     }
-    const order = [desk, ...p.participants.filter((x) => x !== desk)];
+    // With a DeskFund, the desk's share is paid back to the fund (the depositors), not to the desk key.
+    const deskSlot = this.fund ? { ...desk, address: this.fund } : desk;
+    const order = [deskSlot, ...p.participants.filter((x) => x !== desk)];
 
     await this.preflight();
     const s = await this.onchain();
@@ -261,15 +287,20 @@ export class VaultRail implements SettlementRail {
           'run `npm run vault:close-stale` in packages/rail to return it to the desk, then open again',
       );
     }
-    const bal = await this.pub.readContract({ address: this.token, abi: testUsdAbi, functionName: 'balanceOf', args: [this.desk.address] });
-    if (bal < amount) throw new Error(`desk holds ${formatUnits(bal, DECIMALS)} tUSD, needs ${p.amount}`);
-    const allowance = await this.pub.readContract({ address: this.token, abi: testUsdAbi, functionName: 'allowance', args: [this.desk.address, this.vault] });
-    if (allowance < amount) await this.send('approve', 'approve', [this.vault, maxUint256], this.token);
+    if (this.fund) {
+      const assets = (await this.pub.readContract({ address: this.fund, abi: DESK_FUND_ABI, functionName: 'totalAssets' } as never)) as bigint;
+      if (assets < amount) throw new Error(`DeskFund holds ${formatUnits(assets, DECIMALS)} tUSD of depositor capital, needs ${p.amount}`);
+    } else {
+      const bal = await this.pub.readContract({ address: this.token, abi: testUsdAbi, functionName: 'balanceOf', args: [this.desk.address] });
+      if (bal < amount) throw new Error(`desk holds ${formatUnits(bal, DECIMALS)} tUSD, needs ${p.amount}`);
+      const allowance = await this.pub.readContract({ address: this.token, abi: testUsdAbi, functionName: 'allowance', args: [this.desk.address, this.vault] });
+      if (allowance < amount) await this.send('approve', 'approve', [this.vault, maxUint256], this.token);
+    }
 
     let roundId = s.roundId + 1n;
     while (await this.pub.readContract({ address: this.vault, abi: deskVaultAbi, functionName: 'roundUsed', args: [roundId] })) roundId += 1n;
 
-    const info = await this.send('open', 'openRound', [roundId, order.map((x) => idToBytes32(x.id)), order.map((x) => x.address), amount]);
+    const info = await this.send('open', 'openRound', [roundId, order.map((x) => idToBytes32(x.id)), order.map((x) => x.address), amount], this.fund ?? this.vault);
     this.order = order;
     this.roundId = roundId;
     this.pot = amount;
@@ -281,7 +312,7 @@ export class VaultRail implements SettlementRail {
       allocations: this.toMap(after.allocations),
       status: 'open',
     };
-    return this.receipt('open', info, `desk deposited ${p.amount} tUSD into DeskVault round ${roundId}`);
+    return this.receipt('open', info, this.fund ? `DeskFund moved ${p.amount} tUSD of depositor capital into DeskVault round ${roundId}` : `desk deposited ${p.amount} tUSD into DeskVault round ${roundId}`);
   }
 
   private async doUpdate(kind: 'reallocate' | 'close', next: Record<string, string>, memo: string): Promise<RailReceipt> {
@@ -298,8 +329,8 @@ export class VaultRail implements SettlementRail {
     const sig = await this.signRisk(primary, this.roundId, version, arr);
     const info =
       kind === 'close'
-        ? await this.send('close', 'closeRound', [this.roundId, version, arr, sig])
-        : await this.send('reallocate', 'reallocate', [this.roundId, version, arr, memo.slice(0, 280), sig]);
+        ? await this.send('close', 'closeRound', [this.roundId, version, arr, sig], this.fund ?? this.vault)
+        : await this.send('reallocate', 'reallocate', [this.roundId, version, arr, memo.slice(0, 280), sig], this.fund ?? this.vault);
     const after = await this.onchain();
     st.version = Number(after.version);
     st.allocations = this.toMap(after.allocations);
@@ -324,7 +355,7 @@ export class VaultRail implements SettlementRail {
   /** Simulates (to surface revert reasons before spending gas), sends with an explicit nonce, waits for confirmation. */
   private async send(kind: string, functionName: string, args: readonly unknown[], address: Hex = this.vault): Promise<TxInfo> {
     const t0 = Date.now();
-    const abi = address === this.vault ? deskVaultAbi : testUsdAbi;
+    const abi = address === this.vault ? deskVaultAbi : address === this.fund ? DESK_FUND_ABI : testUsdAbi;
     const { request } = await this.pub.simulateContract({
       address,
       abi,

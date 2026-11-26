@@ -295,6 +295,23 @@ export interface DeskState {
   railPending?: number;
   /** LLM layer counters. */
   llm?: { calls: number; cap: number; active: boolean };
+  /** Depositor vault (DeskFund) on BNB Smart Chain testnet, when depositor capital funds the rounds. Amounts are decimal strings in tUSD; shares in CDS. */
+  fund?: {
+    address: string;
+    explorerUrl: string;
+    /** Depositors' assets in the fund (excludes the loss reserve and protocol fees; excludes capital out in an open round). */
+    totalAssets: string;
+    totalShares: string;
+    /** tUSD per share. */
+    sharePrice: string;
+    /** Loss reserve, filled by evaluation fees; it pays before depositors. */
+    reserve: string;
+    protocolFees: string;
+    roundActive: boolean;
+    /** Depositor capital out in the open round. */
+    roundPot: string;
+    updatedAt: number;
+  };
   /** On-chain links that are not rail steps: contract deployments (Scorecard, DeskVault, test token). */
   onchainLinks?: { label: string; explorerUrl: string; txHash: string }[];
   /** Newest last, capped at 200. */

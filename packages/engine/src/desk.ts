@@ -95,6 +95,8 @@ export interface DeskDeps {
   llmStats?: () => { calls: number; cap: number; active: boolean };
   /** Links to on-chain transactions for the dashboard. */
   onchainLinks?: () => OnchainLink[];
+  /** Latest DeskFund (depositor vault) state, when depositor capital funds the rounds. */
+  fundState?: () => DeskState['fund'] | undefined;
   /** Optional brain overrides (e.g. LlmBrain). Missing ones default to the rule brain. */
   brains?: Partial<Record<AgentId, Brain>>;
   /** Atlas feeds the Scorecard reads at close, by symbol (SCORECARD_FEEDS). Sent in symbol order. */
@@ -106,8 +108,8 @@ export interface DeskDeps {
 
 export const DEFAULT_AGENTS: Omit<AgentSpec, 'address'>[] = [
   { agentId: 'momentum', name: 'Momentum', strategy: 'Buys the BNB Chain major with the best 1h and 24h change; exits on reversal.' },
-  { agentId: 'rwa', name: 'RWA Rotator', strategy: 'Rotates into tokenized gold and treasuries when fear is high or event risk rises; back to cash otherwise.' },
-  { agentId: 'event', name: 'Event Trader', strategy: 'Trades the gap between Cournot probabilities and venue prices: adds BNB on underpriced good news, cuts to cash on underpriced bad news.' },
+  { agentId: 'rwa', name: 'RWA Rotator', strategy: 'Rotates into tokenized gold when fear is high or event risk rises; back to cash otherwise.' },
+  { agentId: 'event', name: 'Event Trader', strategy: 'Trades the regime in Cournot\'s divergence ranking: adds BNB in a trend, mean-reverts BNB in a range, cuts to cash when risk-off.' },
 ];
 
 type Phase = DeskState['round']['phase'];
@@ -190,6 +192,7 @@ export class Desk extends EventEmitter {
       scorecards: [...this.scorecards],
       events: [...this.events],
       onchainLinks: this.d.onchainLinks?.() ?? [],
+      fund: this.d.fundState?.(),
       economics: this.economics(),
       llm: this.d.llmStats?.(),
     };

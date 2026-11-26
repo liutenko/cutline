@@ -1,0 +1,40 @@
+{
+  "chainId": 97,
+  "fund": {
+    "address": "0x75d3554D6928720E33F42Dffc602759193a04501",
+    "txHash": "0x92b8b46ef03725dabd5f1c43defb437cb8ef2e29be9fb9fd37c30f9ad1209b3b",
+    "block": 144980723,
+    "url": "https://testnet.bscscan.com/address/0x75d3554D6928720E33F42Dffc602759193a04501",
+    "symbol": "CDS",
+    "decimals": 9
+  },
+  "vault": {
+    "address": "0x32531012539B280f430AFa1eEC6f809040CE83bF",
+    "txHash": "0x32e9db60e597ce6cc220bf7e80982dc75f6e023eb053682031ffbbc6c7184558",
+    "block": 144980734,
+    "url": "https://testnet.bscscan.com/address/0x32531012539B280f430AFa1eEC6f809040CE83bF"
+  },
+  "token": {
+    "address": "0x61377805405038A67d7E44A66c1d8530593ade0F",
+    "url": "https://testnet.bscscan.com/address/0x61377805405038A67d7E44A66c1d8530593ade0F",
+    "symbol": "tUSD",
+    "decimals": 6
+  },
+  "owner": "0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E",
+  "operator": "0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E",
+  "riskManager": "0x8565ECE93D4131ADfBEFacA8Bb5Ebe85296D0FEd",
+  "txs": {
+    "deployDeskFund": {
+      "hash": "0x92b8b46ef03725dabd5f1c43defb437cb8ef2e29be9fb9fd37c30f9ad1209b3b",
+      "url": "https://testnet.bscscan.com/tx/0x92b8b46ef03725dabd5f1c43defb437cb8ef2e29be9fb9fd37c30f9ad1209b3b"
+    },
+    "deployDeskVault": {
+      "hash": "0x32e9db60e597ce6cc220bf7e80982dc75f6e023eb053682031ffbbc6c7184558",
+      "url": "https://testnet.bscscan.com/tx/0x32e9db60e597ce6cc220bf7e80982dc75f6e023eb053682031ffbbc6c7184558"
+    },
+    "setVault": {
+      "hash": "0xd1a507e6864e4f142a9b94a75ff144a43f9a350581d0802cdcbcb9e32cf2c1f8",
+      "url": "https://testnet.bscscan.com/tx/0xd1a507e6864e4f142a9b94a75ff144a43f9a350581d0802cdcbcb9e32cf2c1f8"
+    }
+  }
+}

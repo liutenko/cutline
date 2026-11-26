@@ -15,6 +15,7 @@ import { DevRail } from './dev/DevRail.ts';
 import type { Brain } from './agents/types.ts';
 import { brainOptionsFromEnv, createRuleBrain } from './agents/RuleBrain.ts';
 import { cachedOnchainLinks } from './onchain.ts';
+import { startFundReader } from './fund.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '../../..');
@@ -201,6 +202,13 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
     summary.push(env.LLM === '0' ? 'brains: RuleBrain (LLM=0)' : 'brains: RuleBrain (deterministic)');
   }
 
+  // ---- depositor vault (DeskFund) ----
+  let fundState: DeskDeps['fundState'];
+  if (railName === 'bnb-testnet-vault' && /^(1|true|yes)$/i.test(env.DESK_FUND?.trim() ?? '')) {
+    const reader = startFundReader(REPO_ROOT, env.BSC_TESTNET_RPC?.trim() || 'https://bsc-testnet-rpc.publicnode.com', warn);
+    if (reader) { fundState = reader; summary.push('fund: DeskFund depositor vault funds the rounds (DESK_FUND=1)'); }
+    else warn('DESK_FUND=1 but contracts/deployments/bscTestnet-fund.json is missing; no fund state shown.');
+  }
   const deps: DeskDeps = {
     provider,
     railFactory,
@@ -214,6 +222,7 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
     brains,
     brainOptions,
     onchainLinks: cachedOnchainLinks(REPO_ROOT),
+    fundState,
     scorecardFeeds,
     llmStats: gate ? () => gate!.stats() : undefined,
   };

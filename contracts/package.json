@@ -9,7 +9,10 @@
     "test": "hardhat test",
     "deploy:testnet": "tsx scripts/deploy.ts bscTestnet",
     "addresses": "tsx scripts/addresses.ts",
-    "deploy:vault": "tsx scripts/deploy-vault.ts"
+    "deploy:vault": "tsx scripts/deploy-vault.ts",
+    "deploy:fund": "tsx scripts/deploy-fund.ts",
+    "seed:fund": "tsx scripts/seed-fund.ts",
+    "abi:fund": "hardhat compile && node scripts/gen-fund-abi.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "^0.15.16",

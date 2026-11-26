@@ -50,6 +50,11 @@ export function loadOnchainLinks(repoRoot: string): OnchainLink[] {
     links.push(link('DeskVault contract', vault, vault.chainId ?? v.chainId));
     links.push(link('Test USD token', token, token?.chainId ?? v.chainId));
   }
+  const f = obj(readJson(path.join(dir, 'bscTestnet-fund.json'))) as (Deployed & Record<string, unknown>) | null;
+  if (f) {
+    links.push(link('DeskFund depositor vault', obj(f.fund), f.chainId));
+    links.push(link('DeskVault funded by DeskFund', obj(f.vault), f.chainId));
+  }
   return links.filter((l): l is OnchainLink => l !== null);
 }
 

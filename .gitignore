@@ -10,3 +10,6 @@ cache/
 .DS_Store
 .vercel
 .gstack/
+
+# DeskFund demo depositor test keys (contracts/scripts/seed-fund.ts)
+contracts/.depositors.json
