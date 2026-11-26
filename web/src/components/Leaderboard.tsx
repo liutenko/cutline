@@ -16,7 +16,7 @@ function Meter({ label, value, limit }: { label: string; value: number; limit: n
   );
 }
 
-export function Leaderboard({ agents, config, phase, memoryOn, asset, history, cutAt }: { agents: AgentAccount[]; config: DeskConfig; phase: DeskState['round']['phase']; memoryOn: boolean; asset: string } & AccountView) {
+export function Leaderboard({ agents, config, phase, asset, history, cutAt }: { agents: AgentAccount[]; config: DeskConfig; phase: DeskState['round']['phase']; asset: string } & AccountView) {
   const order: Record<AgentAccount['status'], number> = { funded: 0, evaluating: 1, cut: 2 };
   const rank = [...agents].sort((a, b) => order[a.status] - order[b.status] || b.pnlPct - a.pnlPct);
   const rules = [
@@ -46,15 +46,8 @@ export function Leaderboard({ agents, config, phase, memoryOn, asset, history, c
                 <span className="rank mono">{i + 1}</span>
                 <h3>{a.name}</h3>
                 <span className="a-strat muted small" title={a.strategy}>{a.strategy}</span>
-                {a.memory?.probation && <span className="status s-probation">Probation</span>}
                 <span className={`status s-${a.status}`}>{STATUS[a.status]}</span>
               </div>
-              {a.memory ? (
-                <div className="a-mem">
-                  <p className="mem-line"><span className="mem-label">Desk memory</span><em title={a.memory.summary}>{a.memory.summary}</em>{a.memory.pages[0] && <span className="mono small muted mem-page"> page {a.memory.pages[0].slug}{a.memory.pages[0].version !== undefined ? ` v${a.memory.pages[0].version}` : ''}</span>}</p>
-                  {a.memory.probation && <p className="small prob-note">Risk budget at {Math.round((config.probationBudgetFactor ?? 0.5) * 100)}% this round: an earlier cut is on record.</p>}
-                </div>
-              ) : memoryOn ? <p className="small muted a-mem">Desk memory: no record yet</p> : null}
               <div className="a-l2">
                 <div className="eq-fig">
                   <span className="big">{usd(a.equityUsd)}</span>

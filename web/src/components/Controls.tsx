@@ -31,7 +31,6 @@ export function Controls({ desk, send }: { desk: DeskState; send: (a: ControlAct
             <button onClick={run({ action: 'pause' })}>Pause</button>
             <button onClick={run({ action: 'reset' })}>Reset</button>
             <button onClick={run({ action: 'close-round' })}>Close round</button>
-            <button onClick={run({ action: 'recall' })}>Recall desk memory</button>
           </div>
           <div className="ctl-row">
             <select value={rogueId} onChange={(e) => setRogueId(e.target.value as AgentAccount['agentId'])} aria-label="Agent">

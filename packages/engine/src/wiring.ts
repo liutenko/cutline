@@ -8,7 +8,7 @@ import { config as loadDotenv } from 'dotenv';
 import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { AgentId, DataProvider, MarketSnapshot, RailName, SettlementRail } from '../../../shared/src/types.ts';
-import { assetLabel, Desk, DEFAULT_AGENTS, errMsg, type AgentSpec, type DeskDeps, type MemoryPort, type SafeFn, type ScorecardPort } from './desk.ts';
+import { assetLabel, Desk, DEFAULT_AGENTS, errMsg, type AgentSpec, type DeskDeps, type ScorecardPort } from './desk.ts';
 import { configFromEnv } from './config.ts';
 import { DevSimProvider } from './dev/DevSimProvider.ts';
 import { DevRail } from './dev/DevRail.ts';
@@ -25,7 +25,6 @@ const RAIL_ENTRY = '../../rail/src/index.ts';
 const SCORECARD_ENTRY = '../../../contracts/src/client.ts';
 const SCORECARD_ABI = '../../../contracts/src/abi.ts';
 const CHAINS_ENTRY = '../../../contracts/src/chains.ts';
-const MEMORY_ENTRY = '../../memory/src/index.ts';
 
 export type DataMode = 'dev' | 'live' | 'replay';
 type Env = Record<string, string | undefined>;
@@ -178,24 +177,6 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
   const scorecardFeeds = parseFeeds(env.SCORECARD_FEEDS, warn);
   if (scorecard) summary.push(`scorecard feeds: ${Object.keys(scorecardFeeds).sort().join(', ') || 'none (empty arrays)'}`);
 
-  // ---- desk memory (Living Brain) ----
-  // Optional in every mode: a missing package or no key means memory is off, never an error.
-  let memory: DeskDeps['memory'] = null;
-  try {
-    const mod = await tryImport(MEMORY_ENTRY);
-    const create = mod.createDeskMemory as ((e: Env) => MemoryPort | null) | undefined;
-    const safeFn = mod.safe as SafeFn | undefined;
-    const client = typeof create === 'function' ? create(env) : null;
-    if (client && typeof safeFn === 'function') {
-      memory = { client, safe: safeFn };
-      summary.push('memory: Living Brain desk memory on (brain "cutline-desk")');
-    } else {
-      summary.push('memory: off (no Living Brain key)');
-    }
-  } catch (e) {
-    summary.push(`memory: off (packages/memory unavailable: ${errMsg(e).slice(0, 120)})`);
-  }
-
   // ---- participants ----
   const deskAddress = addressFromKey(env, 'DESK_KEY', data, warn);
   const riskAddress = addressFromKey(env, 'RISK_KEY', data, warn);
@@ -235,7 +216,6 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
     onchainLinks: cachedOnchainLinks(REPO_ROOT),
     scorecardFeeds,
     llmStats: gate ? () => gate!.stats() : undefined,
-    memory,
   };
   summary.push(`config: evalTicks ${config.evalTicks}, tickMs ${config.tickMs}, pot ${config.realPot} ${assetLabel(railName, config.asset)}, band ${brainOptions.bandPct}%, rebalance ${brainOptions.rebalancePp} pts, re-entry ${brainOptions.reentryTicks} ticks`);
   return { deps, summary, gate };

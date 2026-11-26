@@ -75,40 +75,8 @@ export interface ScorecardPort {
   }): Promise<ScorecardTx>;
 }
 
-/** What the desk needs from the memory package (DeskMemory satisfies it). */
-export interface MemoryPort {
-  recallAgent(agentId: AgentId, name: string): Promise<NonNullable<AgentAccount['memory']> | null>;
-  rememberRound(report: RoundReport): Promise<unknown[]>;
-  pendingSources(): Promise<unknown[]>;
-}
-export type SafeFn = <T>(label: string, fn: () => Promise<T> | T, log?: (msg: string) => void) => Promise<T | null>;
-
-/** Mirrors packages/memory RoundReport (kept local so the engine compiles without that package). */
-export interface RoundReport {
-  roundId: number;
-  closedAt: number;
-  agents: {
-    agentId: AgentId;
-    name: string;
-    strategy: string;
-    status: AgentAccount['status'];
-    pnlPct: number;
-    trades: number;
-    rejectedOrders: number;
-    cutReason?: string;
-    rogue?: boolean;
-    notableRejections: string[];
-  }[];
-  eventMultiplier: number;
-  scorecardTx?: string;
-}
-
 /** Engine-only control actions, accepted by the server in addition to the shared ControlAction. */
-export type EngineControl = ControlAction | { action: 'recall' };
-
-export const MEMORY_BRAIN_NAME = 'cutline-desk';
-const RECALL_LIMIT_MS = 6000;
-const PENDING_REFRESH_MS = 20_000;
+export type EngineControl = ControlAction;
 
 export interface DeskDeps {
   provider: DataProvider;
@@ -123,10 +91,6 @@ export interface DeskDeps {
   scorecard?: ScorecardPort | null;
   /** Rule brain tuning (band, rebalance, re-entry). */
   brainOptions?: Partial<RuleBrainOptions>;
-  /** Desk long-term memory (Living Brain). Null or absent: memory is off. */
-  memory?: { client: MemoryPort; safe: SafeFn } | null;
-  /** Overall time limit for the round-start recall of all agents. Default 6000 ms. */
-  memoryRecallLimitMs?: number;
   /** LLM call counters for the dashboard, when the LLM layer is on. */
   llmStats?: () => { calls: number; cap: number; active: boolean };
   /** Links to on-chain transactions for the dashboard. */
@@ -186,13 +150,6 @@ export class Desk extends EventEmitter {
   private lastNote = new Map<AgentId, string>();
   private fillCount = new Map<AgentId, number>();
   private rejectCount = new Map<AgentId, number>();
-  private notableRejections = new Map<AgentId, string[]>();
-  private probation = new Set<AgentId>();
-  private memStatus: NonNullable<DeskState['memoryStatus']> = { enabled: false, pendingCaptures: 0 };
-  private pendingCheckedAt = 0;
-  private pendingInFlight = false;
-  /** Bumped on reset so a slow recall or write never lands on a newer round. */
-  private memGen = 0;
   private paidUnits = 0n;
   private lossUnits = 0n;
   private warnedNoEvents = false;
@@ -213,7 +170,6 @@ export class Desk extends EventEmitter {
     this.instruments = deps.provider.instruments();
     this.now = deps.now ?? Date.now;
     this.resetAccounts();
-    if (deps.memory) this.memStatus = { enabled: true, brainName: MEMORY_BRAIN_NAME, pendingCaptures: 0 };
   }
 
   // ---------- public API ----------
@@ -236,7 +192,6 @@ export class Desk extends EventEmitter {
       onchainLinks: this.d.onchainLinks?.() ?? [],
       economics: this.economics(),
       llm: this.d.llmStats?.(),
-      memoryStatus: this.memoryStatus(),
     };
   }
 
@@ -307,8 +262,6 @@ export class Desk extends EventEmitter {
     this.fundedPaperEquity.clear();
     this.fillCount.clear();
     this.rejectCount.clear();
-    this.notableRejections.clear();
-    this.probation.clear();
   }
 
   private participants(): RailParticipant[] {
@@ -482,13 +435,6 @@ export class Desk extends EventEmitter {
 
   private async doControl(a: EngineControl): Promise<void> {
     switch (a.action) {
-      case 'recall':
-        if (this.round.phase === 'evaluation' || this.round.phase === 'funded') {
-          throw new Error('Recall runs outside a round; close or reset the round first.');
-        }
-        if (!this.d.memory) throw new Error('Desk memory is off (no Living Brain key).');
-        await this.recallAll();
-        return;
       case 'start':
         if (this.railError) throw new Error(`The rail is halted: ${this.railError} Reset the desk first.`);
         if (this.round.phase === 'settled') this.doReset();
@@ -537,7 +483,6 @@ export class Desk extends EventEmitter {
 
   private doReset(): void {
     this.dispose();
-    this.memGen++;
     this.round = { id: 0, tick: 0, phase: 'idle', startedAt: null };
     this.resetAccounts();
     this.lastNote.clear();
@@ -588,8 +533,6 @@ export class Desk extends EventEmitter {
       this.log('error', `Could not open the settlement session: ${errMsg(e)}`);
       return;
     }
-    // Desk memory: recall each agent's record before the first tick trades.
-    if (this.d.memory) await this.recallAll(true);
     this.round.phase = 'evaluation';
     this.log('info', `Round ${this.round.id} opened: ${this.cfg.realPot} ${this.asset} pot, ${this.d.agents.length} agents in evaluation for ${this.cfg.evalTicks} ticks.`);
     if (this.d.scorecard?.registerAgents && !this.registered) {
@@ -662,7 +605,7 @@ export class Desk extends EventEmitter {
       account: a,
       instruments: this.instruments,
       config: this.cfg,
-      eventMultiplier: this.multiplierFor(a),
+      eventMultiplier: this.multiplier,
       rogue: !!a.rogue,
       note: (m: string) => {
         if (this.lastNote.get(a.agentId) === m) return;
@@ -694,7 +637,7 @@ export class Desk extends EventEmitter {
       this.emitEvent({ type: 'budget', ts, multiplier: em.multiplier, reason: em.reason });
     }
 
-    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplierFor(a));
+    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplier);
 
     // Agents propose in parallel (LLM latency), then orders are gated and filled one by one.
     const active = this.accounts.filter((a) => a.status !== 'cut');
@@ -717,22 +660,18 @@ export class Desk extends EventEmitter {
           instruments: this.instruments,
           config: this.cfg,
           eventMultiplier: this.multiplier,
-          probationFactor: this.probation.has(a.agentId) ? this.probationFactor : undefined,
         });
         this.emitEvent({ type: 'decision', ts: this.now(), order: o, decision });
         if (!decision.approved) {
           this.rejectCount.set(a.agentId, (this.rejectCount.get(a.agentId) ?? 0) + 1);
           const why = decision.checks.find((c) => !c.pass)?.detail;
-          const list = this.notableRejections.get(a.agentId) ?? [];
-          if (why && list.length < 3 && !list.includes(why)) list.push(why);
-          this.notableRejections.set(a.agentId, list);
           continue;
         }
         const f = fillOrder(a, o, s, this.fee);
         if (f) {
           this.fillCount.set(a.agentId, (this.fillCount.get(a.agentId) ?? 0) + 1);
           this.emitEvent({ type: 'fill', ts: this.now(), fill: f });
-          markAccount(a, s, this.cfg, this.multiplierFor(a));
+          markAccount(a, s, this.cfg, this.multiplier);
         }
       }
     }
@@ -753,7 +692,7 @@ export class Desk extends EventEmitter {
 
   /** Why an evaluating agent is not funded yet, or null if it passes. */
   private evalCheck(a: AgentAccount): string | null {
-    const minTrades = (this.cfg.evalMinTrades ?? 2) + (this.probation.has(a.agentId) ? 1 : 0);
+    const minTrades = (this.cfg.evalMinTrades ?? 2);
     const minPnl = this.cfg.evalMinPnlPct ?? -0.5;
     const n = this.fillCount.get(a.agentId) ?? 0;
     const why: string[] = [];
@@ -766,7 +705,7 @@ export class Desk extends EventEmitter {
   private async markAndEnforce(): Promise<void> {
     const s = this.snapshot;
     if (!s) return;
-    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplierFor(a));
+    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplier);
     for (const a of this.accounts) {
       if (a.status === 'cut') continue;
       const b = checkBreach(a, this.cfg);
@@ -780,7 +719,7 @@ export class Desk extends EventEmitter {
     const wasFunded = a.status === 'funded';
     const fills = closeAllPositions(a, s, `cut-t${this.round.tick}`, this.fee);
     for (const f of fills) this.emitEvent({ type: 'fill', ts: this.now(), fill: f });
-    markAccount(a, s, this.cfg, this.multiplierFor(a));
+    markAccount(a, s, this.cfg, this.multiplier);
     a.status = 'cut';
     a.cutReason = reason;
     this.emitEvent({ type: 'cut', ts: this.now(), agentId: a.agentId, reason });
@@ -865,7 +804,7 @@ export class Desk extends EventEmitter {
       if (a.status === 'cut') continue;
       const fills = closeAllPositions(a, s, 'close', this.fee);
       for (const f of fills) this.emitEvent({ type: 'fill', ts: this.now(), fill: f });
-      markAccount(a, s, this.cfg, this.multiplierFor(a));
+      markAccount(a, s, this.cfg, this.multiplier);
     }
 
     // Payout: each funded agent gets profitSplitAgent of its real profit if positive; the desk gets everything else.
@@ -924,105 +863,6 @@ export class Desk extends EventEmitter {
       } else if (r.error) {
         this.log('error', `Scorecard closeRound failed: ${errMsg(r.error)}`);
       }
-    }
-
-    // Desk memory: write the round without blocking settlement.
-    if (this.d.memory) void this.rememberRound(this.roundReport());
-  }
-
-  // ---------- desk memory ----------
-
-  private get probationFactor(): number {
-    return this.cfg.probationBudgetFactor ?? 0.5;
-  }
-
-  /** Event multiplier for one agent: the shared multiplier, times the probation factor when it applies. */
-  private multiplierFor(a: AgentAccount): number {
-    return this.probation.has(a.agentId) ? this.multiplier * this.probationFactor : this.multiplier;
-  }
-
-  private memoryStatus(): NonNullable<DeskState['memoryStatus']> {
-    if (!this.d.memory) return { enabled: false, pendingCaptures: 0 };
-    if (this.memStatus.pendingCaptures > 0) void this.refreshPending(false);
-    return { ...this.memStatus };
-  }
-
-  private memError(msg: string): void {
-    // Message only; strip anything that looks like a credential.
-    this.memStatus.error = msg.replace(/(bearer\s+)?[A-Za-z0-9_\-]{32,}/gi, '[redacted]').slice(0, 300);
-    this.log('warn', this.memStatus.error);
-  }
-
-  /** Recalls every agent in parallel within 6 seconds overall. Late or failed recalls leave memory undefined. */
-  private async recallAll(atRoundStart = false): Promise<void> {
-    const mem = this.d.memory!;
-    const gen = this.memGen;
-    let open = true;
-    const recalls = this.accounts.map(async (a) => {
-      const r = await mem.safe('recallAgent', () => mem.client.recallAgent(a.agentId, a.name), (m) => this.memError(m));
-      if (!open || gen !== this.memGen || !r) return;
-      a.memory = { source: r.source, summary: r.summary, pages: r.pages, probation: r.probation, recalledAt: r.recalledAt };
-      if (atRoundStart && r.probation) {
-        this.probation.add(a.agentId);
-        const slug = r.pages[0]?.slug ?? 'unknown page';
-        this.log('warn', `${a.name} starts on probation: the desk's memory (Living Brain page ${slug}) records an earlier cut. Risk budget x ${this.probationFactor} and ${(this.cfg.evalMinTrades ?? 2) + 1} trades needed to be funded.`);
-      }
-    });
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([
-      Promise.all(recalls),
-      new Promise<void>((res) => { timer = setTimeout(res, this.d.memoryRecallLimitMs ?? RECALL_LIMIT_MS); }),
-    ]);
-    clearTimeout(timer);
-    open = false;
-    this.memStatus.lastRecallAt = this.now();
-    await this.refreshPending(true);
-  }
-
-  private roundReport(): RoundReport {
-    const tx = this.scorecards.find((x) => x.roundId === this.round.id);
-    return {
-      roundId: this.round.id,
-      closedAt: this.now(),
-      eventMultiplier: this.multiplier,
-      ...(tx ? { scorecardTx: tx.txHash } : {}),
-      agents: this.accounts.map((a) => ({
-        agentId: a.agentId,
-        name: a.name,
-        strategy: this.d.agents.find((x) => x.agentId === a.agentId)?.strategy ?? a.strategy,
-        status: a.status,
-        pnlPct: Math.round(a.pnlPct * 100) / 100,
-        trades: this.fillCount.get(a.agentId) ?? 0,
-        rejectedOrders: this.rejectCount.get(a.agentId) ?? 0,
-        ...(a.cutReason ? { cutReason: a.cutReason } : {}),
-        ...(a.rogue ? { rogue: true } : {}),
-        notableRejections: [...(this.notableRejections.get(a.agentId) ?? [])],
-      })),
-    };
-  }
-
-  private async rememberRound(report: RoundReport): Promise<void> {
-    const mem = this.d.memory!;
-    const r = await mem.safe('rememberRound', () => mem.client.rememberRound(report), (m) => this.memError(m));
-    if (!r) return;
-    this.memStatus.lastWriteAt = this.now();
-    delete this.memStatus.error;
-    this.log('info', `Round written to desk memory: ${r.length} captures sent to Living Brain.`);
-    await this.refreshPending(true);
-  }
-
-  /** Refreshes pendingCaptures at most every 20 seconds (or now when forced). Never throws. */
-  private async refreshPending(force: boolean): Promise<void> {
-    const mem = this.d.memory;
-    if (!mem || this.pendingInFlight) return;
-    if (!force && this.now() - this.pendingCheckedAt < PENDING_REFRESH_MS) return;
-    this.pendingInFlight = true;
-    this.pendingCheckedAt = this.now();
-    try {
-      const p = await mem.safe('pendingSources', () => mem.client.pendingSources(), (m) => this.memError(m));
-      if (p) this.memStatus.pendingCaptures = p.length;
-    } finally {
-      this.pendingInFlight = false;
     }
   }
 }

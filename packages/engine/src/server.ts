@@ -27,8 +27,6 @@ export function parseControl(body: unknown): EngineControl {
     case 'reset':
     case 'close-round':
       return { action: b.action };
-    case 'recall':
-      return { action: 'recall' };
     case 'rogue':
       if (typeof b.agentId !== 'string' || !AGENT_IDS.has(b.agentId)) throw new Error('rogue needs agentId: momentum, rwa or event');
       return { action: 'rogue', agentId: b.agentId as 'momentum' | 'rwa' | 'event' };

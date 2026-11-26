@@ -29,7 +29,7 @@ const AGENTS: { id: AgentId; name: string; strategy: string; address: Hex }[] = 
 const CONFIG: DeskConfig = {
   paperAccountUsd: 25000, realPot: '10', realAllocationPerAgent: '3', asset: 'usdt', profitSplitAgent: 0.8,
   maxDrawdownPct: 6, dailyLossLimitPct: 3, maxOrderPctOfLiquidity: 2, priceToleranceBps: 50, maxConcentrationPct: 40,
-  baseRiskBudgetPct: 100, minEventMultiplier: 0.25, evalTicks: 6, tickMs: 1400, evalMinTrades: 3, evalMinPnlPct: 0, poolFeePct: 0.25, probationBudgetFactor: 0.5,
+  baseRiskBudgetPct: 100, minEventMultiplier: 0.25, evalTicks: 6, tickMs: 1400, evalMinTrades: 3, evalMinPnlPct: 0, poolFeePct: 0.25,
 };
 
 function rng(seed: number): () => number {
@@ -63,8 +63,6 @@ class Sim {
   private llmCalls = 0;
   private pending = 0;
   private links: { label: string; explorerUrl: string; txHash: Hex }[] = [];
-  private lastRecallAt = 0;
-  private lastWriteAt = 0;
   constructor(private speed: number, private emitState: (s: DeskState) => void, private emitEvent: (e: DeskEvent) => void) {
     this.init();
   }
@@ -80,8 +78,6 @@ class Sim {
     this.llmCalls = 0;
     this.pending = 0;
     this.links = [];
-    this.lastRecallAt = Date.now();
-    this.lastWriteAt = 0;
     const now = Date.now();
     const marks: Record<string, PriceMark> = {};
     const liquidity: MarketSnapshot['liquidity'] = {};
@@ -95,16 +91,6 @@ class Sim {
       startEquityUsd: 25000, cashUsd: 25000, positions: [], equityUsd: 25000, peakEquityUsd: 25000, dayStartEquityUsd: 25000,
       pnlUsd: 0, pnlPct: 0, drawdownPct: 0, dailyLossPct: 0, riskBudgetUsd: 25000, realAllocation: '0', equityHistory: [25000],
     }));
-    agents[0]!.memory = {
-      source: 'Living Brain', probation: true, recalledAt: now,
-      summary: 'Cut in round 3 for a 6.2% drawdown after sizing up into a thin token. Keeps trend exposure small since then.',
-      pages: [{ slug: 'momentum-agent', version: 3, title: 'Momentum agent record' }],
-    };
-    agents[1]!.memory = {
-      source: 'Living Brain', probation: false, recalledAt: now,
-      summary: 'Two rounds funded, no breaches. Rotates into gold early when fear is high and stays inside its budget.',
-      pages: [{ slug: 'rwa-agent', version: 2, title: 'Real-world assets agent record' }],
-    };
     this.brains = {
       momentum: { acct: agents[0]!, rogueSteps: 0, startedTick: null, cool: 0 },
       rwa: { acct: agents[1]!, rogueSteps: 0, startedTick: null, cool: 0 },
@@ -183,7 +169,7 @@ class Sim {
       a.pnlPct = (a.pnlUsd / a.startEquityUsd) * 100;
       a.drawdownPct = Math.max(0, ((a.peakEquityUsd - a.equityUsd) / a.peakEquityUsd) * 100);
       a.dailyLossPct = Math.max(0, ((a.dayStartEquityUsd - a.equityUsd) / a.dayStartEquityUsd) * 100);
-      a.riskBudgetUsd = a.status === 'cut' ? 0 : (a.equityUsd * CONFIG.baseRiskBudgetPct) / 100 * mult * (a.memory?.probation ? (CONFIG.probationBudgetFactor ?? 1) : 1);
+      a.riskBudgetUsd = a.status === 'cut' ? 0 : (a.equityUsd * CONFIG.baseRiskBudgetPct) / 100 * mult;
     }
     snap.ts = Date.now();
     snap.fearGreed = Math.round(this.fg);
@@ -514,7 +500,6 @@ class Sim {
     for (const a of s.agents) a.realAllocation = final[a.agentId]!;
     s.running = false;
     s.round.phase = 'settled';
-    this.lastWriteAt = Date.now();
     this.receipt({ kind: 'close', offchain: false, allocations: final, memo: 'Round closed, one settlement', onchain: true });
     this.emitState(this.snapshot());
     setTimeout(() => {
@@ -567,11 +552,6 @@ class Sim {
         }
         break;
       }
-      case 'recall':
-        if (s.round.phase === 'evaluation' || s.round.phase === 'funded') throw new Error('Recall is only allowed outside a round (409).');
-        this.lastRecallAt = Date.now();
-        this.emit({ type: 'log', ts: Date.now(), level: 'info', message: 'Desk memory recalled for every agent.' });
-        break;
       case 'close-round':
         if (s.round.phase !== 'idle') this.closeRound();
         break;
@@ -585,7 +565,6 @@ class Sim {
     const fundedAlloc = funded.reduce((t, a) => t + Number(a.realAllocation), 0);
     const paid = this.s.round.phase === 'settled' ? this.s.agents.reduce((t, a) => t + Number(a.realAllocation), 0) : 0;
     const lost = this.s.agents.filter((a) => a.status === 'cut').reduce((t, a) => t + Math.min(3, Math.max(0, (a.startEquityUsd - a.equityUsd) * scale)), 0);
-    this.s.memoryStatus = { enabled: true, brainName: 'proving-ground-desk', pendingCaptures: this.s.round.phase === 'settled' ? 0 : 2, lastWriteAt: this.lastWriteAt || undefined, lastRecallAt: this.lastRecallAt };
     this.s.railPending = this.pending;
     this.s.onchainLinks = this.links;
     this.s.llm = { calls: this.llmCalls, cap: 150, active: true };

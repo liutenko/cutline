@@ -8,7 +8,7 @@ Last updated: 2026-11-26
 2. Start the dashboard: `cd web && npm run dev`, open `http://localhost:5173`.
 3. Check the header tag. "LIVE" means real data. The rail tag shows which rail runs.
 4. Be honest about the mode. With the vault rail the capital moves on BNB Smart Chain testnet with test tokens. With the local rail nothing is on-chain, so say so, and open the transactions from the README table instead. Open the cut, close and scorecard transactions in browser tabs beforehand.
-5. Learn the layout. Three columns: on the left the "Desk economics" block (pot, capital at risk, paid to agents, losses absorbed) above the agent leaderboard; in the centre the order tape; on the right "Event risk, from Cournot", then "Settlement, on-chain", then "Desk memory". "Demo controls" is a button at the bottom right. Open it once, then press Reset so the round is clean.
+5. Learn the layout. Three columns: on the left the "Desk economics" block (pot, capital at risk, paid to agents, losses absorbed) above the agent leaderboard; in the centre the order tape; on the right "Event risk, from Cournot", then "Settlement, on-chain". "Demo controls" is a button at the bottom right. Open it once, then press Reset so the round is clean.
 6. Have a second terminal ready with the fallback command below.
 7. Each on-chain step takes about 5 seconds. While the Settlement panel shows "1 transaction confirming", keep talking. Do not wait in silence.
 

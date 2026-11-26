@@ -98,8 +98,6 @@ export interface RiskContext {
   instruments: Instrument[];
   config: DeskConfig;
   eventMultiplier: number;
-  /** Extra risk-budget factor for an agent on probation (earlier cut in the desk's memory). */
-  probationFactor?: number;
 }
 
 export function checkAgentStatus(order: Order, ctx: RiskContext): RiskCheck {
@@ -173,9 +171,7 @@ export function checkPriceAgreement(order: Order, ctx: RiskContext): RiskCheck {
 
 export function checkEventBudget(order: Order, ctx: RiskContext): RiskCheck {
   const equity = ctx.account.equityUsd;
-  const pf = ctx.probationFactor !== undefined && ctx.probationFactor !== 1 ? ctx.probationFactor : undefined;
-  const budget = (equity * ctx.config.baseRiskBudgetPct * ctx.eventMultiplier * (pf ?? 1)) / 100;
-  const prob = pf !== undefined ? ` x probation factor ${pf}: the desk's memory records an earlier cut` : '';
+  const budget = (equity * ctx.config.baseRiskBudgetPct * ctx.eventMultiplier) / 100;
   const gross = grossExposure(ctx.account, ctx.snapshot);
   const base = { name: 'event-budget' as const, source: 'Cournot' as const };
   if (order.side === 'sell') {
@@ -183,7 +179,7 @@ export function checkEventBudget(order: Order, ctx: RiskContext): RiskCheck {
     return {
       ...base,
       pass: true,
-      detail: `Sell lowers gross exposure from ${usd(gross)} to ${usd(after)} against a ${usd(budget)} budget (multiplier ${ctx.eventMultiplier.toFixed(2)}${prob}).`,
+      detail: `Sell lowers gross exposure from ${usd(gross)} to ${usd(after)} against a ${usd(budget)} budget (multiplier ${ctx.eventMultiplier.toFixed(2)}).`,
     };
   }
   const after = gross + order.notionalUsd;
@@ -192,8 +188,8 @@ export function checkEventBudget(order: Order, ctx: RiskContext): RiskCheck {
     ...base,
     pass: ok,
     detail: ok
-      ? `Gross exposure after the order is ${usd(after)}, within the ${usd(budget)} budget (equity ${usd(equity)} x ${ctx.config.baseRiskBudgetPct}% x multiplier ${ctx.eventMultiplier.toFixed(2)}${prob}).`
-      : `Gross exposure after the order would be ${usd(after)}, above the ${usd(budget)} budget (equity ${usd(equity)} x ${ctx.config.baseRiskBudgetPct}% x multiplier ${ctx.eventMultiplier.toFixed(2)}${prob}).`,
+      ? `Gross exposure after the order is ${usd(after)}, within the ${usd(budget)} budget (equity ${usd(equity)} x ${ctx.config.baseRiskBudgetPct}% x multiplier ${ctx.eventMultiplier.toFixed(2)}).`
+      : `Gross exposure after the order would be ${usd(after)}, above the ${usd(budget)} budget (equity ${usd(equity)} x ${ctx.config.baseRiskBudgetPct}% x multiplier ${ctx.eventMultiplier.toFixed(2)}).`,
   };
 }
 

@@ -328,31 +328,17 @@ a { color: var(--accent); text-underline-offset: 2px; }
 .alloc-bar { margin: 2px 0 3px; }
 .probs .num { font-size: 17px; }
 
-.s-probation { border: 1px solid var(--amber); color: var(--amber); }
-.a-l1 .s-probation { margin-left: auto; }
-.a-l1 .s-probation + .status { margin-left: 0; }
-.a-mem { line-height: 1.3; }
-.mem-line { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; }
-.mem-label { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 6px; }
-.mem-line em { font-family: var(--serif); font-size: 12.5px; }
-.prob-note { color: var(--amber); }
 .src-snip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .sources li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .src-snip { max-width: 55%; }
-.mem-err { color: var(--red); }
-.mem-cap { margin-top: 2px; }
 
 .agent { gap: 3px; padding: 5px 4px 5px 9px; }
 .a-l2 .big { font-size: 22px; }
-.mem-line { -webkit-line-clamp: 3; }
 .economics dd, .economics dd.mono { font-size: 15px; }
 .economics dl { gap: 1px 14px; }
 .masthead { padding: 10px 0 8px; }
 .mast-title h1 { font-size: 30px; }
 .panel-head h2 { font-size: 16px; }
-.memory .panel-head { margin-bottom: 1px; }
-.memory p { line-height: 1.3; }
-.mem-page { white-space: nowrap; }
 .rules { font-size: 11px; margin-bottom: 2px; }
 .economics { margin-bottom: 3px; }
 .panel-head { margin-bottom: 1px; }
@@ -387,6 +373,5 @@ a { color: var(--accent); text-underline-offset: 2px; }
 
 .claim.one { padding: 1px 0; }
 .vault-note { font-size: 10.5px; }
-.memory .small { font-size: 11px; }
 .formula { display: inline-block; margin-top: 1px; }
 .formula { font-family: var(--sans); font-size: 11px; white-space: nowrap; }

@@ -87,7 +87,6 @@ Requires Node 22 or newer (the vendored Cournot client needs 22.20 or newer). Cl
 cd packages/data   && npm install
 cd ../engine       && npm install
 cd ../rail         && npm install
-cd ../memory       && npm install
 cd ../../contracts && npm install && npm run compile
 cd ../web          && npm install
 ```
@@ -130,10 +129,6 @@ Set `VITE_ENGINE_URL` if the engine runs elsewhere. Open `http://localhost:5173/
 
 **Scorecard deployment.** `cd contracts && npm run deploy:testnet`, then set `SCORECARD_ADDRESS` in `.env`.
 
-## Desk memory (optional)
-
-**Not verified end to end.** The client was verified against the live Living Brain service for reads (authentication, brain lookup, search). Writes are untested because the account has no prepaid balance. After each round the desk writes what every agent did to Living Brain (ChatAndBuild's memory layer), and before the next round it reads each agent's record. An agent with an earlier cut on record starts on probation: risk budget x 0.5, and one more trade is needed to be funded. The module is `packages/memory/`. It is tested offline (27 tests). It is off unless `LIVINGBRAIN_API_KEY` is set.
-
 ## Configuration
 
 Names and meaning only. Values live in `.env`, which is never committed.
@@ -158,7 +153,6 @@ Names and meaning only. Values live in `.env`, which is never committed.
 | `COURNOT_API_KEY`, `COURNOT_MAX_CALLS`, `COURNOT_DAILY_MAX`, `COURNOT_CACHE_TTL_MS` | Cournot key, live call budget per process (default 0, cache only), daily call cap, maximum age of an old proof still served |
 | `COURNOT_ASSESS_TTL_MS`, `COURNOT_RANKING_TTL_MS` | Refresh interval for claim assessments (default 15 min) and the ranking (default 30 min) |
 | `ANTHROPIC_API_KEY`, `LLM`, `LLM_MAX_CALLS` | Optional: lets Claude choose among rule candidates; `LLM=0` turns it off; call cap per process |
-| `LIVINGBRAIN_API_KEY`, `LIVINGBRAIN_SUBJECT_ID` | Optional desk memory: service key and the subject the records are kept under. Memory is off without the key |
 | `DESK_KEY`, `RISK_KEY`, `AGENT_MOMENTUM_KEY`, `AGENT_RWA_KEY`, `AGENT_EVENT_KEY` | Test keys for the desk, the risk manager and the three agents |
 | `BSC_TESTNET_RPC`, `BSC_MAINNET_RPC` | BNB Chain RPC endpoints |
 | `SCORECARD_ADDRESS`, `SCORECARD_NETWORK` | Deployed Scorecard and its network (`bscTestnet` default, or `bsc`) |
@@ -172,13 +166,12 @@ Run on 2026-11-26. All pass.
 
 | Package | Command | Result |
 |---|---|---|
-| Engine | `cd packages/engine && npm test` | 50 passing |
+| Engine | `cd packages/engine && npm test` | 46 passing |
 | Data | `cd packages/data && npm run test:offline` | 17 passing |
 | Rail | `cd packages/rail && npm test` (run `npm run compile` in `contracts` first) | 19 passing |
 | Contracts | `cd contracts && npx hardhat test` | 17 passing |
-| Memory | `cd packages/memory && npm run test:offline` | 27 passing |
 
-Live tests (`npm run test:live` in `packages/data`, `packages/rail` and `packages/memory`) call external services and are not part of the counts above.
+Live tests (`npm run test:live` in `packages/data` and `packages/rail`) call external services and are not part of the counts above.
 
 ## Cournot Integration
 
