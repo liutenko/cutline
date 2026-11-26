@@ -13,3 +13,6 @@ cache/
 
 # DeskFund demo depositor test keys (contracts/scripts/seed-fund.ts)
 contracts/.depositors.json
+
+# Throwaway testnet wallet for recording the Vault deposit (contracts/scripts/demo-wallet.ts)
+contracts/.demo-wallet.json
