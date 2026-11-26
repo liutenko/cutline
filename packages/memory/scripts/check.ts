@@ -12,7 +12,7 @@ if (!mem) {
 try {
   console.log('brain id:', await mem.brainId());
   const profile = await mem.profile().catch((e: Error) => `(not readable: ${e.message})`);
-  console.log('profile:', typeof profile === 'string' ? profile : JSON.stringify(profile, null, 2));
+  console.log('profile:', profile === undefined || profile === null ? '(empty, not set yet)' : typeof profile === 'string' ? profile : JSON.stringify(profile, null, 2));
   const stats = await mem.stats();
   console.log('pages:', stats.pageCount, 'sources:', stats.sourceCount, 'connections:', stats.connectionCount);
   const pending = await mem.pendingSources();

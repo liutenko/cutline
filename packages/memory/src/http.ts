@@ -83,7 +83,7 @@ export class LbHttp {
       const detail = typeof msg === 'string' ? msg : Array.isArray(msg) ? msg.join('; ') : text.slice(0, 200);
       const safeDetail = detail.split(this.o.apiKey).join('[redacted]');
       if (res.status === 402 || /insufficient balance|payment required/i.test(safeDetail)) {
-        throw new LivingBrainError(`${label} failed: HTTP ${res.status} Living Brain balance is empty: add prepaid credit`, res.status, json);
+        throw new LivingBrainError(`${label} failed: HTTP ${res.status} Living Brain balance is empty: add prepaid credit (server: ${safeDetail})`, res.status, json);
       }
       lastErr = new LivingBrainError(`${label} failed: HTTP ${res.status} ${safeDetail}`.trim(), res.status, json);
       if (res.status !== 429 && res.status < 500) throw lastErr; // 400/401/404 will not succeed on retry

@@ -10,7 +10,8 @@
     "test:live": "tsx --test test/cmc.live.test.ts",
     "typecheck": "tsc --noEmit",
     "record": "tsx scripts/record.ts",
-    "snapshot": "tsx scripts/snapshot.ts"
+    "snapshot": "tsx scripts/snapshot.ts",
+    "cournot:proofs": "tsx scripts/cournot-proofs.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { EventRisk } from '../../../shared/src/types.js';
 import { PACKAGE_DIR, PROOFS_DIR } from './env.js';
 import { mapProbabilityResponse } from './cournot-map.js';
+import { CournotBudgetError, processCallCount, reserveLiveCall, resetProcessCalls } from './budget.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,25 +27,21 @@ export interface AssessOpts {
   now?: () => number;
   /** Key for later calls. Default: env COURNOT_API_KEY (passed to the client through its own env handling). */
   apiKey?: string;
+  /** Cross-process daily cap. Default env COURNOT_DAILY_MAX, else 600. */
+  dailyMax?: number;
   /** Override for tests. */
   clientPath?: string;
 }
 
-export class CournotBudgetError extends Error {}
 export class CournotCallError extends Error {
   constructor(message: string, readonly state?: string) {
     super(message);
   }
 }
 
-let liveCallsThisProcess = 0;
-export function liveCallCount(): number {
-  return liveCallsThisProcess;
-}
-/** For tests only. */
-export function resetLiveCallCount(): void {
-  liveCallsThisProcess = 0;
-}
+export const liveCallCount = processCallCount;
+export const resetLiveCallCount = resetProcessCalls;
+export { CournotBudgetError };
 
 export function slugify(s: string): string {
   return s
@@ -124,14 +121,6 @@ export function maxCallsFromEnv(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-/** Shared per-process billable-call budget. Counts before the call: an uncertain failure may still bill. */
-export function reserveLiveCall(maxCalls: number): void {
-  if (liveCallsThisProcess >= maxCalls) {
-    throw new CournotBudgetError(`No fresh Cournot proof and the live call budget is ${maxCalls} (set COURNOT_MAX_CALLS to allow a live call).`);
-  }
-  liveCallsThisProcess += 1;
-}
-
 export function clientCommit(): string | undefined {
   try {
     const head = readFileSync(path.join(PACKAGE_DIR, 'vendor/cournot-skills/.git/HEAD'), 'utf8').trim();
@@ -159,11 +148,8 @@ export async function assessClaim(claim: string, opts: AssessOpts): Promise<Even
     return mapProbabilityResponse({ claim, marketId: opts.marketId, polarity: opts.polarity, body: cached.proof.rawResponse, requestId: cached.proof.requestId, fetchedAt: cached.proof.fetchedAt, live: false });
   }
 
-  const budget = opts.maxCalls ?? maxCallsFromEnv();
-  if (liveCallsThisProcess >= budget) {
-    throw new CournotBudgetError(`No fresh Cournot proof for this claim and the live call budget is ${budget} (set COURNOT_MAX_CALLS to allow a live call).`);
-  }
-  liveCallsThisProcess += 1; // count before the call: an uncertain failure may still bill
+  // process cap + cross-process daily cap; counted before the call because an uncertain failure may still bill
+  reserveLiveCall({ maxCalls: opts.maxCalls ?? maxCallsFromEnv(), kind: 'assessment', proofDir, dailyMax: opts.dailyMax, now: now() });
 
   mkdirSync(proofDir, { recursive: true });
   const teeFile = path.join(proofDir, `.tee-${now()}-${process.pid}.jsonl`);

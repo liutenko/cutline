@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { EventRisk } from '../../../shared/src/types.js';
-import { COURNOT_CLIENT, COURNOT_PROOF_DIR, COURNOT_TEE, DEFAULT_TTL_MS, CournotCallError, clientCommit, maxCallsFromEnv, pickBilling, redactIp, reserveLiveCall } from './cournot.js';
+import { COURNOT_CLIENT, COURNOT_PROOF_DIR, COURNOT_TEE, DEFAULT_TTL_MS, CournotCallError, clientCommit, maxCallsFromEnv, pickBilling, redactIp } from './cournot.js';
+import { reserveLiveCall } from './budget.js';
 import { classifyPolarity } from './polarity.js';
 
 const execFileAsync = promisify(execFile);
@@ -18,6 +19,7 @@ export interface DivergenceOpts {
   proofDir?: string;
   now?: () => number;
   apiKey?: string;
+  dailyMax?: number;
   clientPath?: string;
 }
 
@@ -67,7 +69,7 @@ export function topByDivergence(events: EventRisk[], n: number): EventRisk[] {
   return [...events].sort((a, b) => Math.abs(b.divergence ?? 0) - Math.abs(a.divergence ?? 0)).slice(0, n);
 }
 
-function findFreshRanking(proofDir: string, ttlMs: number, now: number): { proof: any } | undefined {
+export function findFreshRanking(proofDir: string, ttlMs: number, now: number): { proof: any } | undefined {
   if (!existsSync(proofDir)) return undefined;
   let best: any;
   for (const f of readdirSync(proofDir)) {
@@ -99,7 +101,7 @@ export async function assessDivergence(opts: DivergenceOpts = {}): Promise<Event
   const cached = findFreshRanking(proofDir, ttl, now());
   if (cached) return mapRanking(cached.proof.rawResponse, cached.proof.fetchedAt, false).classified;
 
-  reserveLiveCall(opts.maxCalls ?? maxCallsFromEnv());
+  reserveLiveCall({ maxCalls: opts.maxCalls ?? maxCallsFromEnv(), kind: 'ranking', proofDir, dailyMax: opts.dailyMax, now: now() });
 
   mkdirSync(proofDir, { recursive: true });
   const teeFile = path.join(proofDir, `.tee-div-${now()}-${process.pid}.jsonl`);

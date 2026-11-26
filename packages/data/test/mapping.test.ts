@@ -139,3 +139,43 @@ test('ranking rows map to EventRisk from the saved real response', () => {
   assert.ok(Math.abs(top[0].divergence!) >= Math.abs(top[4].divergence!));
   assert.equal(top[0].divergence, top[0].cournotProbability - top[0].venuePrice!);
 });
+
+import { reserveLiveCall, readUsage, resetProcessCalls, CournotBudgetError as BudgetErr } from '../src/budget.js';
+import { cournotWindows, createLiveProvider } from '../src/provider.js';
+
+test('daily ledger caps calls across processes and persists by kind', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'led-'));
+  resetProcessCalls();
+  reserveLiveCall({ maxCalls: 10, kind: 'assessment', proofDir: dir, dailyMax: 2 });
+  reserveLiveCall({ maxCalls: 10, kind: 'ranking', proofDir: dir, dailyMax: 2 });
+  assert.throws(() => reserveLiveCall({ maxCalls: 10, kind: 'assessment', proofDir: dir, dailyMax: 2 }), BudgetErr);
+  const u = readUsage(dir);
+  assert.equal(u.calls, 2);
+  assert.deepEqual(u.byKind, { assessment: 1, ranking: 1 });
+  // a "second process": the ledger file alone enforces the cap even with a fresh per-process counter
+  resetProcessCalls();
+  assert.throws(() => reserveLiveCall({ maxCalls: 10, kind: 'assessment', proofDir: dir, dailyMax: 2 }), BudgetErr);
+  resetProcessCalls();
+  assert.throws(() => reserveLiveCall({ maxCalls: 0, kind: 'assessment', proofDir: path.join(dir, 'x'), dailyMax: 5 }), BudgetErr);
+});
+
+test('cournot windows: specific TTLs, defaults, and CACHE_TTL as max stale', () => {
+  assert.deepEqual(cournotWindows({}), { assessTtl: 900_000, rankingTtl: 1_800_000, maxStale: 86_400_000 });
+  const w = cournotWindows({ COURNOT_ASSESS_TTL_MS: '60000', COURNOT_CACHE_TTL_MS: '3600000' });
+  assert.equal(w.assessTtl, 60_000);
+  assert.equal(w.maxStale, 3_600_000);
+});
+
+test('provider serves a stale proof (live:false) when the budget is exhausted and never throws', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'stale-'));
+  const proof = fx('cournot-probability-1341.json');
+  writeFileSync(path.join(dir, 'p.json'), JSON.stringify({ ...proof, fetchedAt: Date.now() - 3 * 3600_000 }));
+  const warnings: string[] = [];
+  const p = createLiveProvider({ proofDir: dir, rankingRows: 0, claims: [{ claim: proof.claim, marketId: '1341', polarity: 'adverse' }], env: { ...process.env, COURNOT_MAX_CALLS: '0', COURNOT_CACHE_TTL_MS: '86400000', CMC_API_KEY: '' }, onWarn: (m) => warnings.push(m) });
+  // only the Cournot path is under test; CoinMarketCap is not called
+  const risk = await p.eventRisks();
+  assert.equal(risk.length, 1);
+  assert.equal(risk[0].live, false);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.ok(warnings.some((w) => /serving the saved proof/.test(w)));
+});
