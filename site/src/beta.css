@@ -80,3 +80,35 @@
   body:not(.terminal) .site-bar > .site-nav { order: 3; flex: 1 0 100%; width: 100%; gap: 22px; justify-content: flex-start; margin: -6px 0 4px; }
   body:not(.terminal) .site-nav .primary { margin-left: auto; }
 }
+
+/* Spacing pass: a consistent vertical rhythm inside panels and sections. */
+.beta-panel > * { margin-top: 0; margin-bottom: 0; }
+.beta-panel > * + * { margin-top: 22px; }
+.beta-panel > .section-title { margin-bottom: 0; }
+.beta-panel > .section-title + * { margin-top: 16px; }
+.beta-panel > .beta-form { margin-top: 26px; }
+.beta-panel > .source-note + .beta-button { margin-top: 24px; }
+.beta-panel > .beta-actions { margin-top: 20px; }
+.beta-panel > .beta-actions + * { margin-top: 18px; }
+.beta-panel .beta-position { margin-top: 18px; }
+.beta-inline { gap: 14px; }
+.beta-form .beta-button { margin-top: 8px; }
+/* Panels hug their content, and the two columns of a grid start their titles on the same line. */
+.beta-grid > .beta-panel { align-self: start; margin: 34px 0; }
+.beta-grid > .beta-section:not(.beta-panel) { padding-top: 68px; }
+/* One divider between the audience columns and the data sources, not two. */
+.beta-audiences { margin-bottom: 0; }
+.beta-audiences + .strip { border-top: 0; }
+.beta-figures > .source-note { color: var(--muted); }
+.stat-word { font-size: 28px; }
+.beta-section > .source-note + .source-note, .table-scroll + .source-note { margin-top: 14px; }
+@media (max-width: 900px) {
+  .beta-grid > .beta-section:not(.beta-panel) { padding-top: 34px; }
+  .beta-grid > .beta-panel { margin: 10px 0 24px; }
+}
+@media (max-width: 520px) {
+  .beta-table th, .beta-table td { padding: 12px 10px 12px 0; font-size: 13px; }
+  .beta-table thead th { white-space: normal; vertical-align: bottom; font-size: 10px; }
+  .stat-word { font-size: 22px; }
+  .hero-actions > a { width: 100%; justify-content: space-between; }
+}

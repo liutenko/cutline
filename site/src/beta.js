@@ -59,7 +59,7 @@ function abiString(hex, headIndex) {
   const bytes = body.slice(offset + 64, offset + 64 + length * 2).match(/../g) || [];
   return new TextDecoder().decode(Uint8Array.from(bytes, b => parseInt(b, 16)));
 }
-function fromUnits(value, decimals, places = 3) {
+function fromUnits(value, decimals, places = 2) {
   const negative = value < 0n;
   const v = negative ? -value : value;
   const base = 10n ** BigInt(decimals);
@@ -138,9 +138,9 @@ async function loadApplications() {
 // Depositor assets include capital that is out in the open round, at cost.
 const fundTotal = f => f.assets + (f.roundActive ? f.roundPot : 0n);
 function fundPrice(f) {
-  if (f.shares === 0n) return "1.000000";
-  // assets have 6 decimals and shares 9, so scale by 1e9 to get six decimal places of price.
-  return fromUnits(fundTotal(f) * 10n ** 9n / f.shares, 6, 6);
+  if (f.shares === 0n) return "1.0000";
+  // Assets have 6 decimals and shares 9, so scale by 1e9 to keep six decimals of price; four are shown.
+  return fromUnits(fundTotal(f) * 10n ** 9n / f.shares, 6, 4);
 }
 
 // ---------- wallet ----------
@@ -444,7 +444,7 @@ function vaultPage() {
         ${stat("Depositor assets", `${fromUnits(fundTotal(f), 6)} <span class="unit">tUSD</span>`, f.roundActive ? `Includes ${fromUnits(f.roundPot, 6)} tUSD out in the open round, at cost.` : "")}
         ${stat("Share price", `${fundPrice(f)} <span class="unit">tUSD</span>`, f.roundActive ? "Settles when the round closes." : "")}
         ${stat("Loss reserve", `${fromUnits(f.reserve, 6)} <span class="unit">tUSD</span>`, "Pays before depositors do.")}
-        ${stat("Status", f.roundActive ? "Round running" : "Between rounds", f.roundActive ? "Deposits open when it settles." : "Deposits and withdrawals are open.")}
+        ${stat("Status", `<span class="stat-word">${f.roundActive ? "Round running" : "Between rounds"}</span>`, f.roundActive ? "Deposits open when it settles." : "Deposits and withdrawals are open.")}
       </dl>` : '<p class="source-note" role="status">Reading the vault contract.</p>'}
       <p class="source-note">Read live from the vault contract on BNB Smart Chain testnet.</p>
     </section>
