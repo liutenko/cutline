@@ -21,11 +21,14 @@ const mimeByExtension = new Map([
 // Only the mock fixture is pinned: it must stay the designer's exact 35-frame payload.
 const mockDigest = "748106347ef54797d5b903c63f68da90a525a950de9b2d0ced2d04ce53eb0c90";
 
-const [document, base, art, runtime, logos] = await Promise.all(
-  ["index.html","base.css","art-direction.css","desk.js","integrations.html"].map(file =>
+const [document, base, artBase, deskRuntime, logos, betaCss, betaRuntime] = await Promise.all(
+  ["index.html","base.css","art-direction.css","desk.js","integrations.html","beta.css","beta.js"].map(file =>
     readFile(new URL(file,src),"utf8")
   )
 );
+// The beta pages (Agents, Vault) are declared before the desk runtime, which starts them after its first render.
+const art = artBase + "\n" + betaCss;
+const runtime = betaRuntime + "\n" + deskRuntime;
 const mockRecording = await readFile(new URL("recording.json",src),"utf8");
 if (createHash("sha256").update(mockRecording).digest("hex") !== mockDigest) {
   throw new Error("The mock recording differs from the handoff baseline.");

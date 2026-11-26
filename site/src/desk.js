@@ -18,7 +18,7 @@ const live = {state:null, online:null, error:"", receivedAt:0, message:"", busy:
 const operator = {rogueAgent:"momentum", shockSymbol:"", shockPct:"-25"};
 const checkpoints = computeCheckpoints();
 const blockFrame = checkpoints.find(c => c.key === "block")?.frame ?? frames.length - 1;
-let idx = Math.max(0, blockFrame), page = location.hash === "#desk" ? "desk" : "home", selected = "momentum", timer = null;
+let idx = Math.max(0, blockFrame), page = ({"#desk":"desk","#agents":"agents","#vault":"vault"})[location.hash] || "home", selected = "momentum", timer = null;
 let selectedOrder = null;
 let deskView = "trading";
 const app = document.querySelector("#app");
@@ -160,6 +160,7 @@ function headerPill(s) {
     return `Live engine<span class="mode-network"> / mode: ${esc(s.mode)}</span>`;
   }
   if (isMock) return 'Mock data<span class="mode-network"> / BNB testnet</span>';
+  if (pausedReplay) return 'Desk paused<span class="mode-network"> / replay</span>';
   return 'Recording<span class="mode-network"> / BNB testnet</span>';
 }
 
@@ -282,7 +283,7 @@ function landingPreview(preview) {
   }
   const blocked = (preview.events || []).some(e => e.type === "decision" && e.decision?.approved === false);
   const jumpAttr = isLive ? 'data-page="desk"' : `data-jump="${blockFrame}"`;
-  const tag = isLive ? "Live engine" : blocked ? "Block checkpoint" : "Latest frame";
+  const tag = isLive ? "Live engine" : pausedReplay ? "Latest recorded round" : blocked ? "Block checkpoint" : "Latest frame";
   return `<section class="feature" aria-labelledby="preview-title">
         <div class="feature-top"><h2 id="preview-title">Agent performance</h2><span>${tag}</span></div>
         <div class="feature-content">
@@ -303,19 +304,25 @@ function landing() {
   const preview = isLive ? live.state : frames[Math.max(0, blockFrame)]?.state;
   const paperSize = preview?.config?.paperAccountUsd;
   const hasFund = Boolean(preview?.fund);
+  const heroNote = pausedReplay
+    ? "Beta on BNB Smart Chain testnet. The desk is paused right now, and the desk page replays the latest recorded round."
+    : "Beta on BNB Smart Chain testnet. The desk is live: agents trade on paper at live prices, and rounds run back to back.";
   return `<div class="landing">
     <section class="hero" aria-labelledby="landing-title">
       <div class="hero-copy">
-        <p class="hero-network source-note">${esc(sourceLabel(preview))}</p>
+        <p class="hero-network source-note">${esc(isProduct || pausedReplay ? heroNote : sourceLabel(preview))}</p>
         <h1 id="landing-title" tabindex="-1">Capital has <span>a cutline.</span></h1>
         <p class="hero-lead">A prop desk for AI trading agents.</p>
         <p class="hero-description">Agents qualify on paper accounts before receiving test-token capital. Every order runs through six risk checks, including liquidity, price agreement and event risk.</p>
-        <div class="hero-actions"><a class="primary" href="#desk" data-page="desk">Open trading desk ${arrow}</a></div>
+        <div class="hero-actions"><a class="primary" href="#agents" data-page="agents">Apply as an agent ${arrow}</a><a class="secondary" href="#vault" data-page="vault">Back the desk ${arrow}</a></div>
+        <p class="hero-watch"><a class="quiet-link" href="#desk" data-page="desk">${pausedReplay ? "Watch the latest round" : "Watch the desk live"} ${arrow}</a></p>
       </div>
       <figure class="hero-visual">
         <img src="@@asset:cutline-hero.jpg@@" alt="" width="1440" height="1080" fetchpriority="high">
       </figure>
     </section>
+    ${isMock ? "" : betaFigures()}
+    ${isMock ? "" : betaAudiences()}
     <section class="strip" aria-labelledby="sources-title"><h2 id="sources-title">Data sources</h2><div class="integrations">${assetLogos}</div></section>
     <div class="landing-secondary">
     <section class="lifecycle-section" aria-labelledby="funding-title">
@@ -331,7 +338,7 @@ function landing() {
     </section>
       ${landingPreview(preview)}
     </div>
-    <footer class="foot">Cutline / Agent capital</footer>
+    ${isMock ? '<footer class="foot">Cutline / Agent capital</footer>' : betaFooter()}
   </div>`;
 }
 
@@ -644,7 +651,8 @@ function render() {
   document.querySelectorAll(".desk-global-nav [data-workspace]").forEach(el => el.setAttribute("aria-pressed", String(el.dataset.workspace === deskView)));
   document.querySelector(".site-nav [data-page='home']").setAttribute("aria-current", page === "home" ? "page" : "false");
   document.querySelector(".site-nav [data-page='desk']").setAttribute("aria-current", page === "desk" ? "page" : "false");
-  app.innerHTML = page === "desk" ? terminal(evidenceOpen) : landing();
+  for (const p of ["agents","vault"]) document.querySelector(`.site-nav [data-page='${p}']`)?.setAttribute("aria-current", page === p ? "page" : "false");
+  app.innerHTML = page === "desk" ? terminal(evidenceOpen) : page === "agents" ? agentsPage() : page === "vault" ? vaultPage() : landing();
   for (const el of app.querySelectorAll("[data-disclosure]")) el.open = disclosureOpen.has(el.dataset.disclosure);
   for (const el of app.querySelectorAll("[data-check]")) el.open = checkOpen.has(el.dataset.check);
   for (const el of app.querySelectorAll("[data-scroll-key]")) {
@@ -692,7 +700,7 @@ document.addEventListener("input", event => {
 });
 
 window.addEventListener("hashchange", () => {
-  const next = location.hash === "#desk" ? "desk" : ["#home",""].includes(location.hash) ? "home" : page;
+  const next = ({"#desk":"desk","#agents":"agents","#vault":"vault","#home":"home","":"home"})[location.hash] ?? page;
   if (next !== page) {
     page = next;
     render();
@@ -787,6 +795,7 @@ async function poll() {
 
 if (pausedReplay && frames.length) idx = 0;
 render();
+if (!isMock) betaStart();
 if (isLive && engineUrl) poll();
 // The paused public page keeps the replay moving, on a loop.
 if (pausedReplay && frames.length > 1) scheduleNext();
