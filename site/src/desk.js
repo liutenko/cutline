@@ -305,7 +305,7 @@ function landing() {
   const paperSize = preview?.config?.paperAccountUsd;
   const hasFund = Boolean(preview?.fund);
   const heroNote = pausedReplay
-    ? "Beta on BNB Smart Chain testnet. The desk is paused right now, and the desk page replays the latest recorded round."
+    ? "Beta on BNB Smart Chain testnet. Live data is paused for now because we reached our data credit limit, so the desk page replays the latest recorded round. We switch it back on for the live demo, or as soon as we have more credits."
     : "Beta on BNB Smart Chain testnet. The desk is live: agents trade on paper at live prices, and rounds run back to back.";
   return `<div class="landing">
     <section class="hero" aria-labelledby="landing-title">
@@ -613,6 +613,7 @@ function terminal(evidenceOpen) {
       ${isLive ? (canControl ? operatorControls(s) : "") : demoControls()}
     </div>
     <p class="source-note desk-source">${esc(sentence(sourceLabel(s)))} ${esc(capitalNote(s))}</p>
+    ${pausedReplay ? `<p class="source-note desk-source paused-note">Live data is paused for now because we reached our data credit limit. We switch it back on for the live demo, or as soon as we have more credits.</p>` : ""}
     ${stale ? `<p class="offline-banner" role="status">Engine offline. Showing the last state received at ${esc(new Date(live.receivedAt).toLocaleTimeString())}. Retrying.</p>` : ""}
     <div class="desk-grid"><div class="desk-main">
     <section class="performance" aria-labelledby="equity-title">

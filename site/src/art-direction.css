@@ -488,3 +488,4 @@ body.terminal[data-workspace=capital] .contracts { font-size: 13px; }
 .offline-banner { margin: 0 0 1rem; padding: .55rem .75rem; border: 1px solid #684932; color: #ffd0b1; font-size: .82rem; }
 
 .alloc-pending{display:block;font-size:11px;color:var(--muted,#9a958c);font-weight:400}
+.desk-source.paused-note { margin-top: -.75rem; }
