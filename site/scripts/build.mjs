@@ -1,8 +1,11 @@
-// Builds two self-contained pages:
-//   dist/index.html  the public site, embedding the real recorded round (recordings/run-fund.json)
-//   dist/mock.html   the designer's mock fixture (src/recording.json), clearly labelled as mock data
+// Builds three self-contained pages:
+//   dist/index.html        the public product: the live desk, read through the site's /api proxy
+//   dist/demo-<slug>.html  the unlisted demo page, replaying a real recorded round (DEMO_RECORDING, default run-live.json)
+//   dist/mock.html         the designer's mock fixture (src/recording.json), clearly labelled as mock data, not deployed
+// The demo slug lives in site/.demo-slug (git-ignored: the repo is public) or DEMO_SLUG.
 // Uses only the Node standard library (Node 18 or later).
 import { createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 
 const src = new URL("../src/", import.meta.url);
@@ -27,7 +30,15 @@ const mockRecording = await readFile(new URL("recording.json",src),"utf8");
 if (createHash("sha256").update(mockRecording).digest("hex") !== mockDigest) {
   throw new Error("The mock recording differs from the handoff baseline.");
 }
-const realRecording = await readFile(new URL("run-fund.json",recordings),"utf8");
+const realRecording = await readFile(new URL(process.env.DEMO_RECORDING || "run-live.json",recordings),"utf8");
+const slugFile = new URL("../.demo-slug", import.meta.url);
+let slug = process.env.DEMO_SLUG || (await readFile(slugFile,"utf8").catch(() => "")).trim();
+if (!slug) {
+  slug = randomBytes(9).toString("base64url");
+  await writeFile(slugFile, slug + "\n");
+}
+if (!/^[A-Za-z0-9_-]{8,}$/.test(slug)) throw new Error("The demo slug must be 8 or more URL-safe characters.");
+const liveRecording = JSON.stringify({ live: true, label: "Live desk on BNB Smart Chain testnet", frames: [] });
 
 function checkRecording(text, name, expectMock) {
   const parsed = JSON.parse(text);
@@ -64,9 +75,17 @@ const embed = text => text.replaceAll("</", "<\\/");
 const pages = [
   {
     file: "index.html",
+    recording: liveRecording,
+    live: true,
+    mock: false,
+    description: "Cutline is a prop desk for AI trading agents on BNB Smart Chain testnet. Watch the live desk: paper trades at live prices, test-token capital, risk checks on every order."
+  },
+  {
+    file: `demo-${slug}.html`,
     recording: realRecording,
     mock: false,
-    description: "Cutline is a prop desk for AI trading agents on BNB Smart Chain testnet. Replay a recorded round with paper trades and test-token capital."
+    unlisted: true,
+    description: "Cutline demo: a recorded round on BNB Smart Chain testnet with paper trades and test-token capital."
   },
   {
     file: "mock.html",
@@ -78,7 +97,7 @@ const pages = [
 
 await mkdir(dist,{recursive:true});
 for (const page of pages) {
-  const parsed = checkRecording(page.recording, page.file, page.mock);
+  const parsed = page.live ? { frames: [], label: "live desk" } : checkRecording(page.recording, page.file, page.mock);
   const slots = {
     STYLES: inlineAssets(base + "\n" + art),
     RECORDING: embed(page.recording),
@@ -86,6 +105,7 @@ for (const page of pages) {
   };
   const built = inlineAssets(document)
     .replace("@@DESCRIPTION@@", page.description)
+    .replace("</head>", page.unlisted || page.mock ? '<meta name="robots" content="noindex, nofollow">\n</head>' : "</head>")
     .replace(/<!-- (STYLES|RECORDING|RUNTIME) -->/g, (_,slot) => slots[slot]);
   await writeFile(new URL(page.file,dist),built);
   const kb = (Buffer.byteLength(built) / 1024).toFixed(0);

@@ -191,6 +191,19 @@ export class VaultRail implements SettlementRail {
     return this.serial('close', () => this.doUpdate('close', final, `Round closed. Final split settled on-chain: ${Object.entries(final).map(([k, v]) => `${k} ${v}`).join(', ')}.`));
   }
 
+  /**
+   * Reads the round state after a write. A load-balanced RPC can answer from a node a block behind,
+   * so retry until the read shows the write (or give up after ~20 s and return the last read).
+   */
+  private async onchainAfter(done: (s: Awaited<ReturnType<VaultRail['onchain']>>) => boolean, tries = 10): Promise<Awaited<ReturnType<VaultRail['onchain']>>> {
+    let s = await this.onchain();
+    for (let i = 1; i < tries && !done(s); i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      s = await this.onchain();
+    }
+    return s;
+  }
+
   /** Reads the vault's on-chain round state. */
   async onchain(): Promise<{ roundId: bigint; version: bigint; pot: bigint; open: boolean; ids: readonly Hex[]; payouts: readonly Hex[]; allocations: readonly bigint[] }> {
     const c = { address: this.vault, abi: deskVaultAbi } as const;
@@ -207,20 +220,26 @@ export class VaultRail implements SettlementRail {
 
   /**
    * Recovery helper: closes a round left open on-chain (for example after a crash), returning the whole
-   * pot to the desk. Never called automatically; run it via `npm run vault:close-stale`.
+   * pot to the desk. Run it via `npm run vault:close-stale`, or set AUTO_CLOSE_STALE=1 so open() does it
+   * (for a desk that runs unattended and may restart mid-round).
    */
   closeStale(): Promise<{ roundId: bigint; receipt: TxInfo } | null> {
     return this.serial('close-stale', async () => {
       await this.preflight();
       const s = await this.onchain();
       if (!s.open) return null;
-      const finalAlloc = s.allocations.map((_, i) => (i === 0 ? s.pot : 0n));
-      const version = s.version + 1n;
-      const sig = await this.signRisk('CloseRound', s.roundId, version, finalAlloc);
-      const info = await this.send('close-stale', 'closeRound', [s.roundId, version, finalAlloc, sig], this.fund ?? this.vault);
-      if (this.st && this.st.status === 'open') this.st.status = 'closed';
-      return { roundId: s.roundId, receipt: info };
+      return this.closeOpenRound(s);
     });
+  }
+
+  private async closeOpenRound(s: Awaited<ReturnType<VaultRail['onchain']>>): Promise<{ roundId: bigint; receipt: TxInfo }> {
+    const finalAlloc = s.allocations.map((_, i) => (i === 0 ? s.pot : 0n));
+    const version = s.version + 1n;
+    const sig = await this.signRisk('CloseRound', s.roundId, version, finalAlloc);
+    const info = await this.send('close-stale', 'closeRound', [s.roundId, version, finalAlloc, sig], this.fund ?? this.vault);
+    if (this.st && this.st.status === 'open') this.st.status = 'closed';
+    await this.onchainAfter((x) => !x.open || x.roundId !== s.roundId);
+    return { roundId: s.roundId, receipt: info };
   }
 
   // ---------- internals ----------
@@ -280,7 +299,11 @@ export class VaultRail implements SettlementRail {
     const order = [deskSlot, ...p.participants.filter((x) => x !== desk)];
 
     await this.preflight();
-    const s = await this.onchain();
+    let s = await this.onchain();
+    if (s.open && process.env.AUTO_CLOSE_STALE === '1') {
+      await this.closeOpenRound(s);
+      s = await this.onchain();
+    }
     if (s.open) {
       throw new Error(
         `round ${s.roundId} is still open on-chain at version ${s.version} with pot ${formatUnits(s.pot, DECIMALS)} tUSD; ` +
@@ -304,7 +327,7 @@ export class VaultRail implements SettlementRail {
     this.order = order;
     this.roundId = roundId;
     this.pot = amount;
-    const after = await this.onchain();
+    const after = await this.onchainAfter((x) => x.open && x.roundId === roundId);
     this.st = {
       sessionId: `round-${roundId}`,
       version: Number(after.version),
@@ -331,7 +354,7 @@ export class VaultRail implements SettlementRail {
       kind === 'close'
         ? await this.send('close', 'closeRound', [this.roundId, version, arr, sig], this.fund ?? this.vault)
         : await this.send('reallocate', 'reallocate', [this.roundId, version, arr, memo.slice(0, 280), sig], this.fund ?? this.vault);
-    const after = await this.onchain();
+    const after = await this.onchainAfter((x) => x.version >= version);
     st.version = Number(after.version);
     st.allocations = this.toMap(after.allocations);
     if (kind === 'close') st.status = 'closed';

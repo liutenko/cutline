@@ -1,5 +1,7 @@
 // HTTP API: GET /api/state, GET /api/events (SSE), POST /api/control. CORS open.
+// With CONTROL_TOKEN set, POST /api/control needs `Authorization: Bearer <token>`; reads stay public.
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { ControlAction, DeskEvent } from '../../../shared/src/types.ts';
 import type { Desk, EngineControl } from './desk.ts';
@@ -8,7 +10,7 @@ import { errMsg } from './desk.ts';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -47,7 +49,14 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
   return s ? JSON.parse(s) : null;
 }
 
-export function createServer(desk: Desk): http.Server {
+function tokenOk(req: http.IncomingMessage, token: string): boolean {
+  const h = String(req.headers.authorization ?? '');
+  const given = Buffer.from(h.startsWith('Bearer ') ? h.slice(7) : '');
+  const want = Buffer.from(token);
+  return given.length === want.length && timingSafeEqual(given, want);
+}
+
+export function createServer(desk: Desk, opts: { controlToken?: string } = {}): http.Server {
   const clients = new Set<http.ServerResponse>();
   const onEvent = (e: DeskEvent) => {
     const line = `data: ${JSON.stringify(e)}\n\n`;
@@ -83,6 +92,7 @@ export function createServer(desk: Desk): http.Server {
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/control') {
+        if (opts.controlToken && !tokenOk(req, opts.controlToken)) return json(res, 401, { ok: false, error: 'Controls are locked on this desk.' });
         let action: EngineControl;
         try {
           action = parseControl(await readBody(req));
@@ -121,9 +131,17 @@ async function main(): Promise<void> {
   const { desk, summary } = created;
   for (const s of summary) console.log(`[engine] ${s}`);
   const port = Number(process.env.PORT || 8787);
-  const server = createServer(desk);
-  server.listen(port, () => console.log(`[engine] Listening on http://localhost:${port} (GET /api/state, GET /api/events, POST /api/control)`));
-  if (process.env.AUTOSTART === '1') await desk.control({ action: 'start' });
+  const controlToken = process.env.CONTROL_TOKEN || undefined;
+  const host = process.env.HOST || '127.0.0.1';
+  const server = createServer(desk, { controlToken });
+  server.listen(port, host, () => console.log(`[engine] Listening on http://${host}:${port} (GET /api/state, GET /api/events, POST /api/control${controlToken ? ', locked by CONTROL_TOKEN' : ''})`));
+  if (process.env.AUTOPILOT === '1') {
+    const { startAutopilot } = await import('./autopilot.ts');
+    const roundMin = Number(process.env.ROUND_MINUTES || 20);
+    const restMin = Number(process.env.REST_MINUTES || 2);
+    startAutopilot(desk, { roundMs: roundMin * 60_000, restMs: restMin * 60_000, log: (m) => console.log(`[engine] ${m}`) });
+    console.log(`[engine] autopilot: rounds of ${roundMin} min with ${restMin} min between them`);
+  } else if (process.env.AUTOSTART === '1') await desk.control({ action: 'start' });
   const stop = () => {
     desk.dispose();
     server.close();

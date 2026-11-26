@@ -6,7 +6,7 @@ The cutline is the line an agent must stay above to keep its capital: break a ri
 
 Last updated: 2026-11-26. Built for the BNB Bangkok hackathon (Developer Track, CoinMarketCap x Atlas, Cournot).
 
-**Public site:** https://cutline-desk.vercel.app plays a recording of a real round on BNB Smart Chain testnet (the round funded from the depositor vault, 2026-11-26 13:34 UTC), labelled as a recording. Every transaction on it links to the testnet explorer. A labelled mock round is at `/mock`.
+**Live desk:** https://cutline-desk.vercel.app shows the desk running now on BNB Smart Chain testnet. Rounds run back to back on depositor capital from the vault: agents are evaluated on paper at live prices, funded, cut when they break a rule, and settled on-chain, with no operator. Every transaction links to the testnet explorer. Trades are paper trades and capital is test tokens.
 
 ## What it is
 
@@ -131,10 +131,13 @@ Set `VITE_ENGINE_URL` if the engine runs elsewhere. Open `http://localhost:5173/
 
 ```bash
 cd site
-npm run build        # dist/index.html from recordings/run-fund.json, dist/mock.html from the mock round
+npm run build                                          # dist/index.html (live desk), an unlisted demo page, dist/mock.html
+ENGINE_ORIGIN=http://<engine-host>:8787 node scripts/vercel-output.mjs   # .vercel/output with /api proxied to the engine
 ```
 
-Open `dist/index.html?engine=http://localhost:8787` to drive a running engine from the same page (start, pause, rogue, shock, close round). Without `?engine=` the page makes no network calls.
+`index.html` reads the desk through the site's own `/api` proxy and shows no controls. The demo page replays a recorded round (`recordings/run-live.json`) with checkpoints and is served only at an unlisted path (`site/.demo-slug`, not committed). Open `dist/index.html?engine=http://localhost:8787` to drive a local engine from the same page; add `?key=<CONTROL_TOKEN>` when the engine is locked.
+
+**Running the desk unattended.** `AUTOPILOT=1` runs rounds back to back (`ROUND_MINUTES`, default 20, then `REST_MINUTES`, default 2) and never uses the demo controls (rogue, shock). `CONTROL_TOKEN` locks `POST /api/control` behind `Authorization: Bearer <token>`; reads stay public. `HOST=0.0.0.0` exposes the engine (default `127.0.0.1`). `AUTO_CLOSE_STALE=1` lets the vault rail close a round left open by a restart, returning its pot to the desk. For a desk that runs all day, stretch the data refresh windows to stay inside the CoinMarketCap plan (`CMC_QUOTE_TTL_MS`, `CMC_LIQUIDITY_TTL_MS`, `CMC_FEAR_GREED_TTL_MS`) and set the Cournot budget (`COURNOT_MAX_CALLS`, `COURNOT_ASSESS_TTL_MS`, `COURNOT_RANKING_TTL_MS`).
 
 **Vault rail (optional).** `RAIL=bnb-testnet-vault` settles on the DeskVault contract on BSC testnet (addresses default to `contracts/deployments/bscTestnet-vault.json`). Needs funded test wallets for the desk and the risk manager (test BNB for gas). Each on-chain step takes about 5 seconds; the engine queues them so trading never waits, and a cut always reaches the chain as its own transaction. `RAIL=local` is the in-memory rail for dev.
 
@@ -151,6 +154,9 @@ Names and meaning only. Values live in `.env`, which is never committed.
 | `VAULT_ADDRESS`, `TEST_USD_ADDRESS` | Optional overrides for the DeskVault and test stablecoin addresses; default to the deployment file |
 | `PORT` | Engine port, default 8787 |
 | `AUTOSTART` | `1` starts the round at launch |
+| `AUTOPILOT`, `ROUND_MINUTES`, `REST_MINUTES` | Unattended rounds, back to back |
+| `CONTROL_TOKEN`, `HOST` | Locks the control endpoint; bind address (default `127.0.0.1`) |
+| `AUTO_CLOSE_STALE` | `1` closes a round a restart left open on-chain |
 | `TICK_MS`, `EVAL_TICKS` | Tick length and ticks an agent must survive before funding |
 | `REAL_POT`, `REAL_ALLOCATION`, `ASSET` | Pot size, allocation per agent, and the asset label shown in the dashboard |
 | `POOL_FEE_PCT`, `EVAL_MIN_TRADES`, `EVAL_MIN_PNL_PCT` | Paper pool fee and evaluation bar |

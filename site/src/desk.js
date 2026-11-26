@@ -1,8 +1,14 @@
 const recording = JSON.parse(document.querySelector("#recording").textContent);
 const isMock = recording.mock === true;
-const engineParam = new URLSearchParams(location.search).get("engine");
-const isLive = engineParam !== null;
-const engineUrl = isLive ? parseEngineUrl(engineParam) : null;
+const params = new URLSearchParams(location.search);
+const engineParam = params.get("engine");
+// The public page (recording.live) reads the desk through the site's own /api proxy.
+const isProduct = recording.live === true && engineParam === null;
+const isLive = engineParam !== null || recording.live === true;
+const engineUrl = engineParam !== null ? parseEngineUrl(engineParam) : isProduct ? location.origin : null;
+// Operator controls only with ?key= (kept for this tab, removed from the address bar) or an explicit ?engine=.
+const controlKey = readControlKey();
+const canControl = !isProduct || Boolean(controlKey);
 // In live mode the embedded recording is ignored and every state comes from the engine.
 const frames = isLive ? [] : recording.frames;
 const live = {state:null, online:null, error:"", receivedAt:0, message:"", busy:false};
@@ -37,6 +43,20 @@ const iconPaths = {
 };
 const assetLogos = "@@INTEGRATIONS@@";
 const marketSymbols = ["BNB","BTCB","XAUT","TSLAB"];
+
+function readControlKey() {
+  let key = params.get("key") || "";
+  try {
+    if (key) sessionStorage.setItem("cutline-key", key);
+    else key = sessionStorage.getItem("cutline-key") || "";
+  } catch { /* storage blocked: the key lasts for this page load */ }
+  if (params.has("key")) {
+    params.delete("key");
+    const q = params.toString();
+    history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
+  }
+  return key;
+}
 
 function parseEngineUrl(value) {
   try {
@@ -105,6 +125,10 @@ function capitalNote(s) {
 }
 
 function sourceLabel(s) {
+  if (isProduct) {
+    if (!s) return live.online === false ? "The live desk is not reachable right now." : "Connecting to the live desk.";
+    return "Live desk on BNB Smart Chain testnet. Agents trade on paper at live prices; rounds run back to back.";
+  }
   if (isLive) {
     if (!engineUrl) return "Live engine address is not a valid http or https URL.";
     if (!s) return live.online === false ? `Live engine at ${engineUrl} is offline.` : `Connecting to the live engine at ${engineUrl}.`;
@@ -115,6 +139,10 @@ function sourceLabel(s) {
 }
 
 function headerPill(s) {
+  if (isProduct) {
+    if (!s || live.online === false) return `Live<span class="mode-network"> / ${live.online === null ? "connecting" : "offline"}</span>`;
+    return 'Live<span class="mode-network"> / BNB testnet</span>';
+  }
   if (isLive) {
     if (!s || live.online === false) return `Live engine<span class="mode-network"> / ${live.online === null && engineUrl ? "connecting" : "offline"}</span>`;
     return `Live engine<span class="mode-network"> / mode: ${esc(s.mode)}</span>`;
@@ -460,7 +488,7 @@ function operatorControls(s) {
     <summary data-focus-key="operator-controls">Operator controls<span class="demo-chevron" aria-hidden="true"></span></summary>
     <section class="demo-panel operator-panel" aria-labelledby="operator-title">
       <h2 id="operator-title">Operator controls</h2>
-      <p>Actions go to the live engine at ${esc(engineUrl)}.</p>
+      <p>Actions go to the live engine${isProduct ? "" : ` at ${esc(engineUrl)}`}.</p>
       <div class="operator-row">${button("start","Start")}${button("pause","Pause")}${button("reset","Reset")}${button("close-round","Close round")}</div>
       <div class="operator-row">
         <label>Agent <select data-op="rogueAgent" data-focus-key="op-rogue-agent">${s.agents.map(a => option(a.agentId, a.name, operator.rogueAgent)).join("")}</select></label>
@@ -493,7 +521,9 @@ async function sendControl(name) {
   live.message = `Sending ${name}.`;
   render();
   try {
-    const response = await fetch(`${engineUrl}/api/control`, {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
+    const headers = {"content-type":"application/json"};
+    if (controlKey) headers.authorization = `Bearer ${controlKey}`;
+    const response = await fetch(`${engineUrl}/api/control`, {method:"POST", headers, body:JSON.stringify(body)});
     if (!response.ok) {
       let msg = `Engine answered HTTP ${response.status}`;
       try { msg = (await response.json()).error || msg; } catch { /* keep default */ }
@@ -510,6 +540,7 @@ async function sendControl(name) {
 function offlineDesk() {
   const reason = !engineUrl
     ? `The engine address "${esc(engineParam)}" is not a valid http or https URL.`
+    : isProduct ? (live.online === null ? "Connecting to the live desk." : "The live desk is not reachable right now. The page keeps retrying.")
     : live.online === null ? `Connecting to ${esc(engineUrl)}.` : `Could not reach ${esc(engineUrl)}. The page keeps retrying.`;
   return `<div class="workspace">
     <div class="round-bar">
@@ -522,7 +553,7 @@ function offlineDesk() {
       <h2 id="offline-title">${live.online === null && engineUrl ? "Waiting for the engine" : "Engine offline"}</h2>
       <p>${reason}</p>
       ${live.error ? `<p class="dim small mono">${esc(live.error)}</p>` : ""}
-      <p><a class="quiet-link" href="${esc(location.pathname)}#desk">Open the recorded round instead ${arrow}</a></p>
+      ${isProduct ? "" : `<p><a class="quiet-link" href="${esc(location.pathname)}#desk">Open the recorded round instead ${arrow}</a></p>`}
     </section>
     <footer class="foot"><span>Cutline / Agent capital</span></footer>
   </div>`;
@@ -559,7 +590,7 @@ function terminal(evidenceOpen) {
         ${roundId}
         ${shocks.map(e => `<span class="round-note">Simulated shock: ${esc(e.symbol)} ${e.pct > 0 ? "+" : ""}${esc(e.pct)}%</span>`).join("")}
       </div>
-      ${isLive ? operatorControls(s) : demoControls()}
+      ${isLive ? (canControl ? operatorControls(s) : "") : demoControls()}
     </div>
     <p class="source-note desk-source">${esc(sentence(sourceLabel(s)))} ${esc(capitalNote(s))}</p>
     ${stale ? `<p class="offline-banner" role="status">Engine offline. Showing the last state received at ${esc(new Date(live.receivedAt).toLocaleTimeString())}. Retrying.</p>` : ""}
@@ -738,7 +769,7 @@ async function poll() {
   }
   clearTimeout(timeout);
   liveRender(wasOnline !== live.online || hadState !== Boolean(live.state));
-  setTimeout(poll, live.online ? 1000 : 3000);
+  setTimeout(poll, live.online ? (isProduct ? 2500 : 1000) : 3000);
 }
 
 render();

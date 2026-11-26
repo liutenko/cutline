@@ -6,9 +6,11 @@ import { PROOFS_DIR } from './env.js';
 const PRO_BASE = 'https://pro-api.coinmarketcap.com';
 const KEYLESS_BASE = 'https://pro-api.coinmarketcap.com/public-api';
 
-export const QUOTE_TTL_MS = 60_000;
-export const LIQUIDITY_TTL_MS = 5 * 60_000;
-export const FEAR_GREED_TTL_MS = 5 * 60_000;
+// Refresh windows. A desk that runs around the clock can stretch them with env to stay inside the monthly credit plan.
+const ttlEnv = (name: string, dflt: number): number => (Number(process.env[name]) > 0 ? Number(process.env[name]) : dflt);
+export const QUOTE_TTL_MS = ttlEnv('CMC_QUOTE_TTL_MS', 60_000);
+export const LIQUIDITY_TTL_MS = ttlEnv('CMC_LIQUIDITY_TTL_MS', 5 * 60_000);
+export const FEAR_GREED_TTL_MS = ttlEnv('CMC_FEAR_GREED_TTL_MS', 5 * 60_000);
 
 export interface CmcClientOpts {
   /** Pro API key. When empty the documented Keyless Public API is used. */
