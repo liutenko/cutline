@@ -14,9 +14,9 @@ Agents are evaluated on paper accounts at live prices, funded with capital held 
 
 **The trades are paper trades.** Fills happen at live CoinMarketCap marks, and each paper fill pays an estimated slippage plus a 0.25% pool fee. The data and the risk decisions are real. Capital, cut-off, payout and scorecard are on-chain on BNB Smart Chain testnet, with test tokens; mainnet and real funds are roadmap. This is an independent hackathon project. Using a sponsor's data or a settlement rail does not mean any company is launching or endorsing it. Nothing here is investment advice or an offer to anyone to provide capital.
 
-![The dashboard during a real run on live data: the rogue agent is blocked by the liquidity check and then cut after a stress test](docs/img/dashboard-cut.png)
+![The trading desk during the recorded round: the rogue agent's MTHT order is blocked by the liquidity, price agreement and event budget checks](docs/img/dashboard-cut.png)
 
-A real run on live data, with capital on BNB Smart Chain testnet (test tokens). The rogue agent is blocked by the liquidity check and cut after a labeled stress test.
+A recording of a real round on live data, with capital on BNB Smart Chain testnet (test tokens). The rogue agent is blocked by three of six checks, then cut after a labelled stress test.
 
 ## What is real and what is simulated
 
@@ -255,7 +255,7 @@ A full round driven by the engine on live market data, on BNB Smart Chain testne
 | Close with the final split | [`0xe6847d27c6f2c0c9787470803c70b452bfe48aa8bb53d6b73734bd46a2a7d45b`](https://testnet.bscscan.com/tx/0xe6847d27c6f2c0c9787470803c70b452bfe48aa8bb53d6b73734bd46a2a7d45b) |
 | Scorecard for that round | [`0x338777a64b590e8469b15890ea286d7a15dbf0d20f77c00ad10e129500c7aea8`](https://testnet.bscscan.com/tx/0x338777a64b590e8469b15890ea286d7a15dbf0d20f77c00ad10e129500c7aea8) |
 
-![The dashboard after the round settled, with the vault transactions and the scorecard link](docs/img/dashboard-settled.png)
+![The capital view after the round settled: the vault transactions, the scorecard link and the depositor vault](docs/img/dashboard-settled.png)
 
 The settled round: four vault transactions and the scorecard link.
 
