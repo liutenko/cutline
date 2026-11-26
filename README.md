@@ -73,7 +73,7 @@ A real run on live data, with capital on BNB Smart Chain testnet (test tokens). 
 
 | Technology | How it is used | Integration code |
 |---|---|---|
-| BNB Chain | All instruments trade on BNB Chain (BNB, CAKE, BTCB, ETH, tokenized gold XAUT and XAUM, tokenized Tesla stock TSLAB, and one thin token MTHT used to show the liquidity check). The Scorecard contract targets BSC testnet (chain 97). Atlas feeds are read from BNB Chain mainnet | `packages/data/src/instruments.ts`, `contracts/contracts/Scorecard.sol`, `contracts/src/chains.ts` |
+| BNB Chain | All instruments trade on BNB Chain (BNB, CAKE, BTCB, ETH, tokenized gold XAUT and XAUM, tokenized Tesla stock TSLAB, and one thin token MTHT used to show the liquidity check). The Scorecard contract targets BSC testnet (chain 97). Atlas feeds are read from BNB Chain mainnet, except the tokenized gold feed, which is on BSC testnet | `packages/data/src/instruments.ts`, `contracts/contracts/Scorecard.sol`, `contracts/src/chains.ts` |
 | CoinMarketCap | Pro API: prices, BNB Chain DEX liquidity and volume, fear and greed. The key stays server-side. Every call is logged | `packages/data/src/cmc.ts`, `packages/data/src/provider.ts` |
 | Atlas | On-chain SingleFeed price feeds, read every tick for BNB, ETH, BTCB, CAKE and TSLAB. A second set of Atlas feeds on BSC testnet (BNB, BTC, ETH) is stamped by the Scorecard at round close | `packages/data/src/atlas.ts`, `packages/engine/src/risk.ts`, `contracts/contracts/Scorecard.sol` |
 | Cournot | Official Cournot Intelligence Oracle Skill client, vendored at a pinned commit. Sets the event-risk multiplier (adverse assessments only) and the event agent's regime | `packages/data/src/cournot.ts`, `packages/data/src/divergence.ts`, `packages/engine/src/risk.ts` |
@@ -220,8 +220,9 @@ Billing footer of the $50,000 assessment, as returned: `billing: "api_key"`, `ch
 
 | Feed set | Chain | Used for |
 |---|---|---|
-| SingleFeed for BNB, CAKE, BTCB, ETH, TSLAB (addresses in `packages/data/src/instruments.ts`) | BNB Chain mainnet | Read by the engine every tick for the price check. XAUT, XAUM and MTHT have no Atlas feed, so they are priced by CoinMarketCap alone |
-| Feeds for BNB, BTC, ETH (names in `SCORECARD_FEEDS`) | BSC testnet | Read on-chain by the Scorecard at round close and stamped next to the engine's off-chain price. Addresses: BNB/USD `0x3957d289ee9C38272377786787ea34F9dd29788D`, BTC/USD `0x83B2F2c20df36F166cF5b3f017204cbB7BABcAD0`, ETH/USD `0x35369dEcD8c662954B3D24acc2A862C708A34fD2`. In the first round written, BNB read 554.83 on-chain against 554.69 off-chain |
+| SingleFeed for BNB, CAKE, BTCB, ETH, TSLAB (addresses in `packages/data/src/instruments.ts`) | BNB Chain mainnet | Read by the engine every tick for the price check |
+| SingleFeed XAU/USD for tokenized gold XAUT (Atlas feed 1189, `0xb3c87f255ce00b2692dc0eaf3e5985fbe2489764`, set up by Atlas for this hackathon; push every 300 s or on a 2% move) | BSC testnet | Read by the engine every tick for the XAUT price check, and stamped by the Scorecard at round close next to the engine's off-chain price. XAUM and MTHT have no Atlas feed, so they are priced by CoinMarketCap alone |
+| Feeds for BNB, BTC, ETH and XAUT (names in `SCORECARD_FEEDS`) | BSC testnet | Read on-chain by the Scorecard at round close and stamped next to the engine's off-chain price. Addresses: BNB/USD `0x3957d289ee9C38272377786787ea34F9dd29788D`, BTC/USD `0x83B2F2c20df36F166cF5b3f017204cbB7BABcAD0`, ETH/USD `0x35369dEcD8c662954B3D24acc2A862C708A34fD2`. In the first round written, BNB read 554.83 on-chain against 554.69 off-chain |
 
 ## Deployed contracts
 

@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { DataProvider, EventRisk, Instrument, Liquidity, MarketSnapshot, PriceMark } from '../../../shared/src/types.js';
-import { AtlasReader, atlasMaxAgeSec, markAgreement, resolveAtlasConfig, type AtlasConfig } from './atlas.js';
+import { ATLAS_TESTNET_FEEDS, AtlasReader, atlasMaxAgeSec, markAgreement, resolveAtlasConfig, type AtlasConfig } from './atlas.js';
 import { assessDivergence, findFreshRanking, mapRanking, topByDivergence } from './divergence.js';
 import { mapProbabilityResponse } from './cournot-map.js';
 import { CmcClient, CmcSource } from './cmc.js';
@@ -68,7 +68,19 @@ export function createLiveProvider(opts: LiveProviderOpts = {}): DataProvider & 
   } catch (e) {
     warn(`ATLAS_FEEDS is invalid: ${(e as Error).message}`);
   }
-  const atlas = atlasCfg ? new AtlasReader(atlasCfg) : undefined;
+  const mainAtlas = atlasCfg ? new AtlasReader(atlasCfg) : undefined;
+  // Atlas feeds that exist only on BNB Smart Chain testnet (set up by Atlas for the hackathon).
+  const testFeeds = Object.fromEntries(Object.entries(ATLAS_TESTNET_FEEDS).filter(([s]) => instruments.some((i) => i.symbol === s) && !mainAtlas?.has(s)));
+  const testAtlas = Object.keys(testFeeds).length
+    ? new AtlasReader({ chainId: 97, rpc: env.BSC_TESTNET_RPC || 'https://bsc-testnet-rpc.publicnode.com', feeds: testFeeds })
+    : undefined;
+  const atlas: AtlasReader | undefined = mainAtlas || testAtlas
+    ? ({
+        get lastErrors() { return { ...(testAtlas?.lastErrors ?? {}), ...(mainAtlas?.lastErrors ?? {}) }; },
+        has: (s: string) => !!(mainAtlas?.has(s) || testAtlas?.has(s)),
+        read: (s: string) => (mainAtlas?.has(s) ? mainAtlas.read(s) : testAtlas!.read(s)),
+      } as unknown as AtlasReader)
+    : undefined;
   const maxAge = atlasMaxAgeSec(env);
   const warned = new Set<string>();
   const warnOnce = (m: string) => {
