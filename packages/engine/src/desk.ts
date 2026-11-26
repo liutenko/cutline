@@ -842,7 +842,8 @@ export class Desk extends EventEmitter {
       const offchainPrices: bigint[] = [];
       for (const sym of Object.keys(this.d.scorecardFeeds ?? {}).sort()) {
         const m = raw.marks[sym];
-        const price = m?.atlasPrice ?? m?.cmcPrice;
+        // The price the desk marked with (CoinMarketCap), so the contract stamps it next to its own Atlas read.
+        const price = m?.cmcPrice;
         if (!price) continue;
         feeds.push(this.d.scorecardFeeds![sym]);
         offchainPrices.push(scalePrice(price));

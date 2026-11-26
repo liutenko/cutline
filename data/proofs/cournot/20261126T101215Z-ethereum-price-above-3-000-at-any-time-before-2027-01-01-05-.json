@@ -1,0 +1,95 @@
+{
+  "claim": "Ethereum price above $3,000 at any time before 2027-01-01 05:00 UTC",
+  "marketId": "1511",
+  "polarity": "favorable",
+  "requestedAt": 1795687934212,
+  "fetchedAt": 1795687935769,
+  "billing": {
+    "billing": "api_key",
+    "charged": false,
+    "free_quota": {
+      "ip": "[redacted]",
+      "total": 3,
+      "used": 3,
+      "remaining": 0
+    },
+    "api_key_quota": {
+      "total": 2000,
+      "used": 38,
+      "remaining": 1962
+    },
+    "x402": null
+  },
+  "rawResponse": {
+    "code": 0,
+    "msg": "Success",
+    "data": {
+      "charged": false,
+      "x402": null,
+      "free_quota": {
+        "ip": "[redacted]",
+        "total": 3,
+        "used": 3,
+        "remaining": 0
+      },
+      "probability": 0.0267,
+      "markets": [
+        {
+          "market_info": {
+            "id": 1511,
+            "title": "Ethereum price above $3,000 at any time before 2027-01-01 05:00 UTC",
+            "description": "",
+            "start_time": "",
+            "end_time": "2027-01-01T05:00:00Z",
+            "market_outcome": "YES",
+            "market_outcome_price": 0.0267
+          },
+          "matching_confidence": 0
+        }
+      ],
+      "basis": [
+        {
+          "source": "kalshi",
+          "summary": "kalshi latest yes price 0.0900 for \"Ethereum price above $3,000 at any time before 2027-01-01 05:00 UTC\" (1 legs), ends 2027-01-01T05:00:00Z",
+          "time": "2026-11-26T10:07:38Z",
+          "url": "https://kalshi.com/markets/kxethabove3000by/kxethabove3000by-01jan270000-300000?op_market_ticker=KXETHABOVE3000BY-01JAN270000-300000-YES"
+        },
+        {
+          "source": "polymarket",
+          "summary": "polymarket latest yes price 0.0267 for \"Ethereum price above $3,000 at any time before 2027-01-01 05:00 UTC\" (2 legs), ends 2027-01-01T05:00:00Z",
+          "time": "2026-11-26T10:08:30Z",
+          "url": "https://polymarket.com/market/will-ethereum-reach-3000-by-december-31-2026-from-june-8"
+        },
+        {
+          "source": "binance",
+          "summary": "Over the 76 days, ETH fell from 2456.5 to 2019.01 with a return of -17.8095%, hitting a low of 1982.6, a maximum drawdown of -27.2298%, and an annualized volatility of 45.422%.",
+          "time": "2026-11-26T09:22:16.632Z",
+          "url": "https://www.binance.com/en/futures/ETHUSDT"
+        },
+        {
+          "source": "venues",
+          "summary": "Across venues over the 76-day window, ETH returns ranged from -0.178591 to -0.178071 with annualized volatility between 0.45422 and 0.490367, while mark prices ranged from 1699.63 to 1700 and 24-hour changes were between 0.03203 and 0.037661.",
+          "time": "2026-11-26T09:22:16.632Z",
+          "url": "https://www.coinglass.com/currencies/ETH"
+        },
+        {
+          "source": "deribit",
+          "summary": "Over the 76-day medium horizon, Deribit ETH options recorded a volume of 91067, a put-call ratio of 0.326474, call open interest of 70857, put open interest of 23133, a DVOL of 0.5157, and a max pain price of 1950.",
+          "time": "2026-11-26T09:22:16.632Z",
+          "url": "https://www.deribit.com/options/ETH"
+        }
+      ],
+      "api_key_quota": {
+        "total": 2000,
+        "used": 38,
+        "remaining": 1962
+      },
+      "billing": "api_key"
+    }
+  },
+  "httpStatus": 200,
+  "clientCommit": "6484146d8a9414f36233087b13f7ed3f4577482a",
+  "redactions": [
+    "data.free_quota.ip"
+  ]
+}

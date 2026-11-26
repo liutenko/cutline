@@ -1,0 +1,95 @@
+{
+  "claim": "Bitcoin price below $50,000 at any time before 2027-01-01 05:00 UTC",
+  "marketId": "1342",
+  "polarity": "adverse",
+  "requestedAt": 1795682513333,
+  "fetchedAt": 1795682514850,
+  "billing": {
+    "billing": "api_key",
+    "charged": false,
+    "free_quota": {
+      "ip": "[redacted]",
+      "total": 3,
+      "used": 3,
+      "remaining": 0
+    },
+    "api_key_quota": {
+      "total": 2000,
+      "used": 17,
+      "remaining": 1983
+    },
+    "x402": null
+  },
+  "rawResponse": {
+    "code": 0,
+    "msg": "Success",
+    "data": {
+      "charged": false,
+      "x402": null,
+      "free_quota": {
+        "ip": "[redacted]",
+        "total": 3,
+        "used": 3,
+        "remaining": 0
+      },
+      "probability": 0.2534,
+      "markets": [
+        {
+          "market_info": {
+            "id": 1342,
+            "title": "Bitcoin price below $50,000 at any time before 2027-01-01 05:00 UTC",
+            "description": "",
+            "start_time": "",
+            "end_time": "2027-01-01T05:00:00Z",
+            "market_outcome": "YES",
+            "market_outcome_price": 0.2534
+          },
+          "matching_confidence": 0
+        }
+      ],
+      "basis": [
+        {
+          "source": "polymarket",
+          "summary": "polymarket latest yes price 0.2640 for \"Bitcoin price below $50,000 at any time before 2027-01-01 05:00 UTC\" (1 legs), ends 2027-01-01T05:00:00Z",
+          "time": "2026-11-26T08:38:32Z",
+          "url": "https://polymarket.com/market/will-bitcoin-dip-to-50000-by-december-31-2026-454-325-222-878-949-487-451-853-523-111"
+        },
+        {
+          "source": "kalshi",
+          "summary": "kalshi latest yes price 0.2200 for \"Bitcoin price below $50,000 at any time before 2027-01-01 05:00 UTC\" (1 legs), ends 2027-01-01T05:00:00Z",
+          "time": "2026-11-26T08:37:44Z",
+          "url": "https://kalshi.com/markets/kxbtcminy/kxbtcminy-27jan01?op_market_ticker=KXBTCMINY-27JAN01-50000.00"
+        },
+        {
+          "source": "binance",
+          "summary": "Across 76 days of coverage, BTC declined -8.6667% from 78200.7 to 71423.3, moving between 71082 and 87385.1 with a maximum drawdown of -17.5048% and annualized volatility of 36.6415%.",
+          "time": "2026-11-26T06:01:31.492Z",
+          "url": "https://www.binance.com/en/futures/BTCUSDT"
+        },
+        {
+          "source": "venues",
+          "summary": "Across venues over 76 days, BTC returns ranged from -8.667% to -7.8879% with annualized volatility between 36.6415% and 37.0399%, while mark prices spanned from 60667.1 to 60680.4.",
+          "time": "2026-11-26T06:01:31.492Z",
+          "url": "https://www.coinglass.com/currencies/BTC"
+        },
+        {
+          "source": "deribit",
+          "summary": "Over the 76-day window, BTC options showed a DVOL of 0.3878, an ATM IV of 0.57465, call open interest of 13554, put open interest of 8963.4, a put-call ratio of 0.66131, and a max pain price of 66000.",
+          "time": "2026-11-26T06:01:31.492Z",
+          "url": "https://www.deribit.com/options/BTC"
+        }
+      ],
+      "api_key_quota": {
+        "total": 2000,
+        "used": 17,
+        "remaining": 1983
+      },
+      "billing": "api_key"
+    }
+  },
+  "httpStatus": 200,
+  "clientCommit": "6484146d8a9414f36233087b13f7ed3f4577482a",
+  "redactions": [
+    "data.free_quota.ip"
+  ]
+}
