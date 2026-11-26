@@ -1,0 +1,19 @@
+{
+  "chainId": 97,
+  "vault": {
+    "address": "0x3c7ff14381299ffeb2d0c3b187f931bddc9fcbe2",
+    "txHash": "0x5de86bd8865592767599175cb0341994e8f569f60dd94399043edcf671ed9b51",
+    "block": 144938521
+  },
+  "token": {
+    "address": "0x61377805405038a67d7e44a66c1d8530593ade0f",
+    "txHash": "0xed69a46729cc513160973b1d0479572c304c2054a4d5755e2765582d37da1738",
+    "block": 144938498,
+    "symbol": "tUSD",
+    "decimals": 6
+  },
+  "desk": "0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E",
+  "riskManager": "0x8565ECE93D4131ADfBEFacA8Bb5Ebe85296D0FEd",
+  "mintTx": "0x21af1618db8888c770531b593f3bcb9c134a219ca650f06d38c80b5e1ef05e8b",
+  "approveTx": "0x9d79b9808a0ae56fb553537f780918393ce5621f71b09ffc3d312eda2d43f67b"
+}

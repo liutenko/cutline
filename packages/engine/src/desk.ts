@@ -26,8 +26,33 @@ import { createRuleBrain, type RuleBrainOptions } from './agents/RuleBrain.ts';
 import type { OnchainLink } from './onchain.ts';
 
 export const EVENT_CAP = 200;
-/** Reallocate when a funded agent's real equity drifts by more than 0.01 of the asset. */
+/** Local rail: reallocate when a funded agent's real equity drifts by more than 0.01 of the asset. */
 const DRIFT_UNITS = 10_000n;
+
+/** Engine settings on top of the shared DeskConfig. On-chain rail pacing defaults: 10 ticks, 0.02 of the asset. */
+export type DeskEngineConfig = DeskConfig & { reallocMinTicks?: number; reallocMinDrift?: number };
+
+/**
+ * One queued desk-key transaction. Rail ops carry the full target allocation; 'scorecard' ops run a
+ * Scorecard call in the same queue, so only one desk-key transaction is ever in flight.
+ */
+interface RailOp {
+  kind: 'fund' | 'cut' | 'drift' | 'close' | 'scorecard';
+  alloc: Record<string, bigint>;
+  memo: string;
+  rail: SettlementRail | null;
+  gen: number;
+  run?: () => Promise<unknown>;
+  done: (r: { ok: boolean; value?: unknown; error?: unknown }) => void;
+}
+
+/** The vault rail exposes its own transaction queue; Scorecard calls run inside it when present. */
+type ExclusiveRail = SettlementRail & { runExclusive?: <T>(fn: () => Promise<T>) => Promise<T> };
+
+/** Display label for the pot asset: the vault rail always holds tUSD (a test token). */
+export function assetLabel(railName: RailName, asset: string): string {
+  return railName === 'bnb-testnet-vault' ? 'tUSD' : asset.toUpperCase();
+}
 
 export interface AgentSpec {
   agentId: AgentId;
@@ -39,6 +64,8 @@ export interface AgentSpec {
 /** The subset of the contracts' ScorecardClient the desk uses. */
 export interface ScorecardPort {
   registerAgents?(agents: { agentId: string; name: string; address: Hex; strategy: string }[]): Promise<unknown>;
+  /** Reads one agent's registration (Scorecard.getAgent). Used to skip registerAgents when nothing changed. */
+  readAgent?(agentId: string): Promise<{ name: string; address: string; strategy: string; exists: boolean }>;
   closeRound(input: {
     roundId: number;
     results: { agentId: string; pnlBps: number; status: 'evaluating' | 'funded' | 'cut' }[];
@@ -48,6 +75,41 @@ export interface ScorecardPort {
   }): Promise<ScorecardTx>;
 }
 
+/** What the desk needs from the memory package (DeskMemory satisfies it). */
+export interface MemoryPort {
+  recallAgent(agentId: AgentId, name: string): Promise<NonNullable<AgentAccount['memory']> | null>;
+  rememberRound(report: RoundReport): Promise<unknown[]>;
+  pendingSources(): Promise<unknown[]>;
+}
+export type SafeFn = <T>(label: string, fn: () => Promise<T> | T, log?: (msg: string) => void) => Promise<T | null>;
+
+/** Mirrors packages/memory RoundReport (kept local so the engine compiles without that package). */
+export interface RoundReport {
+  roundId: number;
+  closedAt: number;
+  agents: {
+    agentId: AgentId;
+    name: string;
+    strategy: string;
+    status: AgentAccount['status'];
+    pnlPct: number;
+    trades: number;
+    rejectedOrders: number;
+    cutReason?: string;
+    rogue?: boolean;
+    notableRejections: string[];
+  }[];
+  eventMultiplier: number;
+  scorecardTx?: string;
+}
+
+/** Engine-only control actions, accepted by the server in addition to the shared ControlAction. */
+export type EngineControl = ControlAction | { action: 'recall' };
+
+export const MEMORY_BRAIN_NAME = 'cutline-desk';
+const RECALL_LIMIT_MS = 6000;
+const PENDING_REFRESH_MS = 20_000;
+
 export interface DeskDeps {
   provider: DataProvider;
   /** Creates a fresh rail for each round. */
@@ -56,11 +118,15 @@ export interface DeskDeps {
   agents: AgentSpec[];
   deskAddress: Hex;
   riskAddress: Hex;
-  config: DeskConfig;
+  config: DeskEngineConfig;
   mode: 'live' | 'replay' | 'dev';
   scorecard?: ScorecardPort | null;
   /** Rule brain tuning (band, rebalance, re-entry). */
   brainOptions?: Partial<RuleBrainOptions>;
+  /** Desk long-term memory (Living Brain). Null or absent: memory is off. */
+  memory?: { client: MemoryPort; safe: SafeFn } | null;
+  /** Overall time limit for the round-start recall of all agents. Default 6000 ms. */
+  memoryRecallLimitMs?: number;
   /** LLM call counters for the dashboard, when the LLM layer is on. */
   llmStats?: () => { calls: number; cap: number; active: boolean };
   /** Links to on-chain transactions for the dashboard. */
@@ -84,13 +150,23 @@ type Phase = DeskState['round']['phase'];
 
 export class Desk extends EventEmitter {
   private d: DeskDeps;
-  private cfg: DeskConfig;
+  private cfg: DeskEngineConfig;
   private instruments: Instrument[];
   private brains = new Map<AgentId, Brain>();
   private accounts: AgentAccount[] = [];
   private fundedPaperEquity = new Map<AgentId, number>();
   private rail: SettlementRail | null = null;
+  /** Last allocation confirmed by the rail. */
   private alloc: Record<string, bigint> = {};
+  /** The desk's intended allocation: confirmed plus everything queued. Funding, cuts and drift build on it. */
+  private target: Record<string, bigint> = {};
+  private railOps: RailOp[] = [];
+  private railBusy = false;
+  /** Bumped on reset so a late receipt never lands on a newer round. */
+  private railGen = 0;
+  private railError: string | null = null;
+  private railIdleWaiters: (() => void)[] = [];
+  private lastDriftTick = 0;
   private receipts: RailReceipt[] = [];
   private scorecards: ScorecardTx[] = [];
   private events: DeskEvent[] = [];
@@ -109,9 +185,21 @@ export class Desk extends EventEmitter {
   private now: () => number;
   private lastNote = new Map<AgentId, string>();
   private fillCount = new Map<AgentId, number>();
+  private rejectCount = new Map<AgentId, number>();
+  private notableRejections = new Map<AgentId, string[]>();
+  private probation = new Set<AgentId>();
+  private memStatus: NonNullable<DeskState['memoryStatus']> = { enabled: false, pendingCaptures: 0 };
+  private pendingCheckedAt = 0;
+  private pendingInFlight = false;
+  /** Bumped on reset so a slow recall or write never lands on a newer round. */
+  private memGen = 0;
   private paidUnits = 0n;
   private lossUnits = 0n;
   private warnedNoEvents = false;
+
+  private get asset(): string {
+    return assetLabel(this.d.railName, this.cfg.asset);
+  }
 
   private get fee(): number {
     return this.cfg.poolFeePct ?? DEFAULT_POOL_FEE_PCT;
@@ -125,6 +213,7 @@ export class Desk extends EventEmitter {
     this.instruments = deps.provider.instruments();
     this.now = deps.now ?? Date.now;
     this.resetAccounts();
+    if (deps.memory) this.memStatus = { enabled: true, brainName: MEMORY_BRAIN_NAME, pendingCaptures: 0 };
   }
 
   // ---------- public API ----------
@@ -140,12 +229,14 @@ export class Desk extends EventEmitter {
       agents: this.accounts.map((a) => ({ ...a, positions: a.positions.map((p) => ({ ...p })), equityHistory: [...(a.equityHistory ?? [])] })),
       snapshot: this.snapshot,
       railState: this.rail?.state() ?? null,
+      railPending: this.railOps.length + (this.railBusy ? 1 : 0),
       receipts: [...this.receipts],
       scorecards: [...this.scorecards],
       events: [...this.events],
       onchainLinks: this.d.onchainLinks?.() ?? [],
       economics: this.economics(),
       llm: this.d.llmStats?.(),
+      memoryStatus: this.memoryStatus(),
     };
   }
 
@@ -164,7 +255,7 @@ export class Desk extends EventEmitter {
   }
 
   /** Runs a control action. Serialized with ticks so state never interleaves. */
-  control(a: ControlAction): Promise<void> {
+  control(a: EngineControl): Promise<void> {
     return this.serial(() => this.doControl(a));
   }
 
@@ -176,6 +267,12 @@ export class Desk extends EventEmitter {
   /** Emits a log event from outside the desk (e.g. the LLM gate). */
   logEvent(level: 'info' | 'warn' | 'error', message: string): void {
     this.log(level, message);
+  }
+
+  /** Resolves once no rail transaction is queued or awaiting confirmation. */
+  whenRailIdle(): Promise<void> {
+    if (!this.railBusy && !this.railOps.length) return Promise.resolve();
+    return new Promise((res) => this.railIdleWaiters.push(res));
   }
 
   /** Stops timers. */
@@ -209,6 +306,9 @@ export class Desk extends EventEmitter {
     for (const s of this.d.agents) this.brains.set(s.agentId, this.d.brains?.[s.agentId] ?? createRuleBrain(s.agentId, this.d.brainOptions));
     this.fundedPaperEquity.clear();
     this.fillCount.clear();
+    this.rejectCount.clear();
+    this.notableRejections.clear();
+    this.probation.clear();
   }
 
   private participants(): RailParticipant[] {
@@ -266,9 +366,10 @@ export class Desk extends EventEmitter {
     return m;
   }
 
+  /** Agent allocations the desk intends, including queued transactions. */
   private currentAgentUnits(): Partial<Record<AgentId, bigint>> {
     const o: Partial<Record<AgentId, bigint>> = {};
-    for (const a of this.d.agents) o[a.agentId] = this.alloc[a.agentId] ?? 0n;
+    for (const a of this.d.agents) o[a.agentId] = this.target[a.agentId] ?? 0n;
     return o;
   }
 
@@ -277,26 +378,119 @@ export class Desk extends EventEmitter {
     for (const [k, v] of Object.entries(r.allocations)) m[k] = toUnits(v);
     this.assertConserved(m);
     this.alloc = m;
+    if (r.kind === 'open' || r.kind === 'close') this.target = { ...m };
     this.receipts.push(r);
     for (const a of this.accounts) a.realAllocation = fromUnits(m[a.agentId] ?? 0n);
     this.emitEvent({ type: 'rail', ts: this.now(), receipt: r });
   }
 
-  private async reallocate(next: Record<string, bigint>, memo: string): Promise<boolean> {
-    if (!this.rail) return false;
-    try {
-      const r = await this.rail.reallocate(this.allocStrings(next), memo);
-      this.applyReceipt(r);
-      return true;
-    } catch (e) {
-      this.log('error', `Rail reallocation failed (${memo}): ${errMsg(e)}`);
-      return false;
-    }
+  // ---------- rail queue ----------
+  // One serialized queue of rail transactions, so an on-chain confirmation never stalls the tick loop.
+  // Funding, cuts and the close are always sent, in order. A drift update not yet sent is superseded by
+  // any newer op, because every op carries the full target allocation.
+
+  /** Queues a rail transaction. Resolves true once its receipt is applied, false if it failed or was dropped. */
+  private enqueueRail(kind: Exclude<RailOp['kind'], 'scorecard'>, alloc: Record<string, bigint>, memo: string): Promise<boolean> {
+    if (!this.rail || this.railError) return Promise.resolve(false);
+    for (const op of this.railOps.filter((x) => x.kind === 'drift')) op.done({ ok: true });
+    this.railOps = this.railOps.filter((x) => x.kind !== 'drift');
+    if (kind !== 'close') this.target = { ...alloc };
+    return new Promise<boolean>((resolve) => {
+      this.railOps.push({ kind, alloc, memo, rail: this.rail, gen: this.railGen, done: (r) => resolve(r.ok) });
+      this.pumpRail();
+    });
   }
 
-  private async doControl(a: ControlAction): Promise<void> {
+  /**
+   * Queues a Scorecard transaction behind every rail op already queued. Its failure is logged by the
+   * caller and never halts the desk. It does not supersede queued drift updates (it carries no allocation).
+   */
+  private enqueueTx<T>(memo: string, run: () => Promise<T>): Promise<{ ok: boolean; value?: T; error?: unknown }> {
+    return new Promise((resolve) => {
+      this.railOps.push({
+        kind: 'scorecard', alloc: {}, memo, rail: this.rail, gen: this.railGen, run,
+        done: (r) => resolve(r as { ok: boolean; value?: T; error?: unknown }),
+      });
+      this.pumpRail();
+    });
+  }
+
+  private pumpRail(): void {
+    if (this.railBusy) return;
+    const op = this.railOps.shift();
+    if (!op) {
+      const w = this.railIdleWaiters;
+      this.railIdleWaiters = [];
+      for (const f of w) f();
+      return;
+    }
+    this.railBusy = true;
+    if (op.kind === 'scorecard') {
+      const rail = op.rail as ExclusiveRail | null;
+      Promise.resolve()
+        .then(() => (rail?.runExclusive ? rail.runExclusive(op.run!) : op.run!()))
+        .then(
+          (value) => op.done({ ok: op.gen === this.railGen, value }),
+          (error) => op.done({ ok: false, error }),
+        )
+        .finally(() => {
+          this.railBusy = false;
+          this.pumpRail();
+        });
+      return;
+    }
+    const strs = this.allocStrings(op.alloc);
+    const rail = op.rail!; // rail ops are only queued while a rail exists
+    Promise.resolve()
+      .then(() => (op.kind === 'close' ? rail.close(strs) : rail.reallocate(strs, op.memo)))
+      .then(
+        (r) => {
+          if (op.gen !== this.railGen) return op.done({ ok: false });
+          this.applyReceipt(r);
+          op.done({ ok: true });
+        },
+        (e) => {
+          if (op.gen === this.railGen) this.railFailed(op, e);
+          op.done({ ok: false, error: e });
+        },
+      )
+      .catch((e) => {
+        this.log('error', `Rail receipt could not be applied: ${errMsg(e)}`);
+        op.done({ ok: false, error: e });
+      })
+      .finally(() => {
+        this.railBusy = false;
+        this.pumpRail();
+      });
+  }
+
+  /** A failed rail transaction is loud: the desk pauses, queued ops are dropped, and only a reset clears it. */
+  private railFailed(op: RailOp, e: unknown): void {
+    this.railError = `${op.kind === 'close' ? 'Rail close' : 'Rail reallocation'} failed (${op.memo}): ${errMsg(e)}`;
+    this.dropRailOps();
+    this.running = false;
+    this.loopGen++;
+    if (this.timer) clearTimeout(this.timer);
+    this.log('error', `${this.railError} The desk is paused; reset the desk to clear it.`);
+  }
+
+  private dropRailOps(): void {
+    const ops = this.railOps;
+    this.railOps = [];
+    for (const op of ops) op.done({ ok: false });
+  }
+
+  private async doControl(a: EngineControl): Promise<void> {
     switch (a.action) {
+      case 'recall':
+        if (this.round.phase === 'evaluation' || this.round.phase === 'funded') {
+          throw new Error('Recall runs outside a round; close or reset the round first.');
+        }
+        if (!this.d.memory) throw new Error('Desk memory is off (no Living Brain key).');
+        await this.recallAll();
+        return;
       case 'start':
+        if (this.railError) throw new Error(`The rail is halted: ${this.railError} Reset the desk first.`);
         if (this.round.phase === 'settled') this.doReset();
         if (this.round.phase === 'idle') await this.openRound();
         if (this.round.phase === 'idle') return; // open failed
@@ -343,13 +537,19 @@ export class Desk extends EventEmitter {
 
   private doReset(): void {
     this.dispose();
+    this.memGen++;
     this.round = { id: 0, tick: 0, phase: 'idle', startedAt: null };
     this.resetAccounts();
     this.lastNote.clear();
     this.paidUnits = 0n;
     this.lossUnits = 0n;
+    this.railGen++;
+    this.dropRailOps();
+    this.railError = null;
+    this.lastDriftTick = 0;
     this.rail = null;
     this.alloc = {};
+    this.target = {};
     this.receipts = [];
     this.shocks.clear();
     this.multiplier = 1;
@@ -359,7 +559,10 @@ export class Desk extends EventEmitter {
   }
 
   private async doResetWithRail(): Promise<void> {
-    // Return everything to the desk before dropping an open session.
+    // Return everything to the desk before dropping an open session. Queued ops are moot: the close
+    // returns everything; wait only for a transaction already in flight.
+    this.dropRailOps();
+    await this.whenRailIdle();
     if (this.rail?.state()?.status === 'open') {
       try {
         const final = this.buildAlloc({});
@@ -379,19 +582,44 @@ export class Desk extends EventEmitter {
       this.rail = this.d.railFactory();
       const r = await this.rail.open({ participants: this.participants(), asset: this.cfg.asset, amount: this.cfg.realPot });
       this.applyReceipt(r);
+      this.lastDriftTick = 0;
     } catch (e) {
       this.rail = null;
       this.log('error', `Could not open the settlement session: ${errMsg(e)}`);
       return;
     }
+    // Desk memory: recall each agent's record before the first tick trades.
+    if (this.d.memory) await this.recallAll(true);
     this.round.phase = 'evaluation';
-    this.log('info', `Round ${this.round.id} opened: ${this.cfg.realPot} ${this.cfg.asset.toUpperCase()} pot, ${this.d.agents.length} agents in evaluation for ${this.cfg.evalTicks} ticks.`);
+    this.log('info', `Round ${this.round.id} opened: ${this.cfg.realPot} ${this.asset} pot, ${this.d.agents.length} agents in evaluation for ${this.cfg.evalTicks} ticks.`);
     if (this.d.scorecard?.registerAgents && !this.registered) {
+      // Queued behind the open receipt, so it never races a rail transaction for the desk key's nonce.
       this.registered = true;
-      this.d.scorecard
-        .registerAgents(this.d.agents.map((a) => ({ agentId: a.agentId, name: a.name, address: a.address, strategy: a.strategy })))
-        .then(() => this.log('info', 'Agents registered on the Scorecard contract.'))
-        .catch((e) => this.log('warn', `Scorecard agent registration failed: ${errMsg(e)}`));
+      void this.registerAgents();
+    }
+  }
+
+  /** Registers agents on the Scorecard once per contract: skipped when the contract already has them as configured. */
+  private async registerAgents(): Promise<void> {
+    const sc = this.d.scorecard!;
+    const specs = this.d.agents.map((a) => ({ agentId: a.agentId, name: a.name, address: a.address, strategy: a.strategy }));
+    const r = await this.enqueueTx('Scorecard agent registration', async () => {
+      let todo = specs;
+      if (sc.readAgent) {
+        const onchain = await Promise.all(specs.map((a) => sc.readAgent!(a.agentId)));
+        todo = specs.filter((a, i) => {
+          const x = onchain[i];
+          return !x.exists || x.name !== a.name || x.strategy !== a.strategy || x.address.toLowerCase() !== a.address.toLowerCase();
+        });
+      }
+      if (todo.length) await sc.registerAgents!(todo);
+      return todo.length;
+    });
+    if (r.ok) {
+      this.log('info', r.value ? `Agents registered on the Scorecard contract (${r.value} of ${specs.length}).` : 'Agents already registered on the Scorecard contract; no transaction sent.');
+    } else {
+      this.registered = false; // try again at the next round start
+      if (r.error) this.log('warn', `Scorecard agent registration failed: ${errMsg(r.error)}`);
     }
   }
 
@@ -434,7 +662,7 @@ export class Desk extends EventEmitter {
       account: a,
       instruments: this.instruments,
       config: this.cfg,
-      eventMultiplier: this.multiplier,
+      eventMultiplier: this.multiplierFor(a),
       rogue: !!a.rogue,
       note: (m: string) => {
         if (this.lastNote.get(a.agentId) === m) return;
@@ -466,7 +694,7 @@ export class Desk extends EventEmitter {
       this.emitEvent({ type: 'budget', ts, multiplier: em.multiplier, reason: em.reason });
     }
 
-    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplier);
+    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplierFor(a));
 
     // Agents propose in parallel (LLM latency), then orders are gated and filled one by one.
     const active = this.accounts.filter((a) => a.status !== 'cut');
@@ -483,14 +711,28 @@ export class Desk extends EventEmitter {
     for (const { a, orders } of proposals) {
       for (const o of orders) {
         this.emitEvent({ type: 'order', ts: this.now(), order: o });
-        const decision = evaluateOrder(o, { account: a, snapshot: s, instruments: this.instruments, config: this.cfg, eventMultiplier: this.multiplier });
+        const decision = evaluateOrder(o, {
+          account: a,
+          snapshot: s,
+          instruments: this.instruments,
+          config: this.cfg,
+          eventMultiplier: this.multiplier,
+          probationFactor: this.probation.has(a.agentId) ? this.probationFactor : undefined,
+        });
         this.emitEvent({ type: 'decision', ts: this.now(), order: o, decision });
-        if (!decision.approved) continue;
+        if (!decision.approved) {
+          this.rejectCount.set(a.agentId, (this.rejectCount.get(a.agentId) ?? 0) + 1);
+          const why = decision.checks.find((c) => !c.pass)?.detail;
+          const list = this.notableRejections.get(a.agentId) ?? [];
+          if (why && list.length < 3 && !list.includes(why)) list.push(why);
+          this.notableRejections.set(a.agentId, list);
+          continue;
+        }
         const f = fillOrder(a, o, s, this.fee);
         if (f) {
           this.fillCount.set(a.agentId, (this.fillCount.get(a.agentId) ?? 0) + 1);
           this.emitEvent({ type: 'fill', ts: this.now(), fill: f });
-          markAccount(a, s, this.cfg, this.multiplier);
+          markAccount(a, s, this.cfg, this.multiplierFor(a));
         }
       }
     }
@@ -501,17 +743,17 @@ export class Desk extends EventEmitter {
     if (this.round.tick >= this.cfg.evalTicks) {
       if (this.round.phase === 'evaluation') this.round.phase = 'funded';
       const ready = this.accounts.filter((a) => a.status === 'evaluating' && this.evalCheck(a) === null);
-      if (ready.length) await this.fund(ready);
+      if (ready.length) this.fund(ready);
       for (const a of this.accounts) a.evalNote = a.status === 'evaluating' ? this.evalCheck(a) ?? undefined : undefined;
     }
 
-    await this.reallocateOnDrift();
+    this.reallocateOnDrift();
     for (const a of this.accounts) sampleEquity(a);
   }
 
   /** Why an evaluating agent is not funded yet, or null if it passes. */
   private evalCheck(a: AgentAccount): string | null {
-    const minTrades = this.cfg.evalMinTrades ?? 2;
+    const minTrades = (this.cfg.evalMinTrades ?? 2) + (this.probation.has(a.agentId) ? 1 : 0);
     const minPnl = this.cfg.evalMinPnlPct ?? -0.5;
     const n = this.fillCount.get(a.agentId) ?? 0;
     const why: string[] = [];
@@ -524,20 +766,21 @@ export class Desk extends EventEmitter {
   private async markAndEnforce(): Promise<void> {
     const s = this.snapshot;
     if (!s) return;
-    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplier);
+    for (const a of this.accounts) markAccount(a, s, this.cfg, this.multiplierFor(a));
     for (const a of this.accounts) {
       if (a.status === 'cut') continue;
       const b = checkBreach(a, this.cfg);
-      if (b) await this.cut(a, b.reason);
+      if (b) this.cut(a, b.reason);
     }
   }
 
-  private async cut(a: AgentAccount, reason: string): Promise<void> {
+  /** Cuts an agent now; a funded agent's cut is queued as its own rail reallocation. */
+  private cut(a: AgentAccount, reason: string): void {
     const s = this.snapshot!;
     const wasFunded = a.status === 'funded';
     const fills = closeAllPositions(a, s, `cut-t${this.round.tick}`, this.fee);
     for (const f of fills) this.emitEvent({ type: 'fill', ts: this.now(), fill: f });
-    markAccount(a, s, this.cfg, this.multiplier);
+    markAccount(a, s, this.cfg, this.multiplierFor(a));
     a.status = 'cut';
     a.cutReason = reason;
     this.emitEvent({ type: 'cut', ts: this.now(), agentId: a.agentId, reason });
@@ -548,15 +791,17 @@ export class Desk extends EventEmitter {
       const units = this.currentAgentUnits();
       units[a.agentId] = 0n;
       this.fundedPaperEquity.delete(a.agentId);
-      await this.reallocate(this.buildAlloc(units), `Cut ${a.agentId}: ${fromUnits(real)} ${this.cfg.asset.toUpperCase()} returned to the desk. ${reason}`);
+      void this.enqueueRail('cut', this.buildAlloc(units), `Cut ${a.agentId}: ${fromUnits(real)} ${this.asset} returned to the desk. ${reason}`);
     }
   }
 
-  private async fund(ready: AgentAccount[]): Promise<void> {
+  /** Funds agents now; the rail reallocation is queued and confirms in the background. */
+  private fund(ready: AgentAccount[]): void {
+    if (!this.rail || this.railError) return;
     const per = toUnits(this.cfg.realAllocationPerAgent);
     const units = this.currentAgentUnits();
     const funded: AgentAccount[] = [];
-    let desk = this.alloc.desk ?? 0n;
+    let desk = this.target.desk ?? 0n;
     for (const a of ready) {
       if (desk < per) {
         this.log('warn', `${a.name} passed evaluation but the desk has only ${fromUnits(desk)} left in the pot.`);
@@ -569,39 +814,47 @@ export class Desk extends EventEmitter {
     if (!funded.length) return;
     const next = this.buildAlloc(units);
     const names = funded.map((a) => a.agentId).join(', ');
-    const ok = await this.reallocate(next, `Funded ${names} with ${this.cfg.realAllocationPerAgent} ${this.cfg.asset.toUpperCase()}${funded.length > 1 ? ' each' : ''} after ${this.round.tick} ticks.`);
-    if (!ok) return;
+    void this.enqueueRail('fund', next, `Funded ${names} with ${this.cfg.realAllocationPerAgent} ${this.asset}${funded.length > 1 ? ' each' : ''} after ${this.round.tick} ticks.`);
     for (const a of funded) {
       a.status = 'funded';
       this.fundedPaperEquity.set(a.agentId, a.equityUsd);
-      this.emitEvent({ type: 'funded', ts: this.now(), agentId: a.agentId, realAllocation: a.realAllocation });
+      this.emitEvent({ type: 'funded', ts: this.now(), agentId: a.agentId, realAllocation: fromUnits(per) });
     }
   }
 
-  private async reallocateOnDrift(): Promise<void> {
+  /**
+   * Mark to market. Local rail: any drift above 0.01, every tick. On-chain rail: at most every
+   * reallocMinTicks ticks and only above reallocMinDrift; a queued update not yet sent is replaced.
+   */
+  private reallocateOnDrift(): void {
     const funded = this.accounts.filter((a) => a.status === 'funded');
-    if (!funded.length) return;
+    if (!funded.length || !this.rail || this.railError) return;
+    const onchain = this.d.railName !== 'local';
+    if (onchain && this.round.tick - this.lastDriftTick < (this.cfg.reallocMinTicks ?? 10)) return;
+    const minUnits = onchain ? floatToUnits(this.cfg.reallocMinDrift ?? 0.02) : DRIFT_UNITS;
     let drift = false;
     const units = this.currentAgentUnits();
     const moved: string[] = [];
     for (const a of funded) {
       const real = this.realEquityUnits(a);
-      const cur = this.alloc[a.agentId] ?? 0n;
+      const cur = this.target[a.agentId] ?? 0n;
       const diff = real > cur ? real - cur : cur - real;
-      if (diff > DRIFT_UNITS) {
+      if (diff > minUnits) {
         drift = true;
         units[a.agentId] = real;
         moved.push(`${a.agentId} ${fromUnits(cur)} -> ${fromUnits(real)}`);
       }
     }
     if (!drift) return;
-    await this.reallocate(this.buildAlloc(units), `Mark to market: ${moved.join('; ')}.`);
+    this.lastDriftTick = this.round.tick;
+    void this.enqueueRail('drift', this.buildAlloc(units), `Mark to market: ${moved.join('; ')}.`);
   }
 
   private async closeRound(): Promise<void> {
     if (this.round.phase !== 'evaluation' && this.round.phase !== 'funded') {
       throw new Error(`Cannot close a round in phase ${this.round.phase}`);
     }
+    if (this.railError) throw new Error(`The rail is halted: ${this.railError} Reset the desk to close the session.`);
     this.running = false;
     this.loopGen++;
     if (this.timer) clearTimeout(this.timer);
@@ -612,7 +865,7 @@ export class Desk extends EventEmitter {
       if (a.status === 'cut') continue;
       const fills = closeAllPositions(a, s, 'close', this.fee);
       for (const f of fills) this.emitEvent({ type: 'fill', ts: this.now(), fill: f });
-      markAccount(a, s, this.cfg, this.multiplier);
+      markAccount(a, s, this.cfg, this.multiplierFor(a));
     }
 
     // Payout: each funded agent gets profitSplitAgent of its real profit if positive; the desk gets everything else.
@@ -633,15 +886,11 @@ export class Desk extends EventEmitter {
     const final = this.buildAlloc(payout);
     const finalStr = this.allocStrings(final);
     if (this.rail) {
-      try {
-        const r = await this.rail.close(finalStr);
-        this.applyReceipt(r);
-        for (const v of Object.values(payout)) this.paidUnits += v ?? 0n;
-        this.lossUnits += finalLoss;
-      } catch (e) {
-        this.log('error', `Rail close failed: ${errMsg(e)}`);
-        return;
-      }
+      // FIFO: every queued funding and cut confirms first, then the close, then the scorecard.
+      const ok = await this.enqueueRail('close', final, `Close round ${this.round.id}`);
+      if (!ok) return; // railFailed already logged loudly and paused the desk
+      for (const v of Object.values(payout)) this.paidUnits += v ?? 0n;
+      this.lossUnits += finalLoss;
     }
     this.round.phase = 'settled';
     this.log('info', `Round ${this.round.id} settled. ${lines.length ? lines.join('; ') + '.' : 'No funded agents.'} Desk receives ${finalStr.desk}.`);
@@ -659,19 +908,121 @@ export class Desk extends EventEmitter {
         feeds.push(this.d.scorecardFeeds![sym]);
         offchainPrices.push(scalePrice(price));
       }
-      try {
-        const tx = await this.d.scorecard.closeRound({
-          roundId: this.round.id,
-          results: this.accounts.map((a) => ({ agentId: a.agentId, pnlBps: Math.round(a.pnlPct * 100), status: a.status })),
-          stateHash,
-          feeds,
-          offchainPrices,
-        });
-        this.scorecards.push(tx);
-        this.emitEvent({ type: 'scorecard', ts: this.now(), tx });
-      } catch (e) {
-        this.log('error', `Scorecard closeRound failed: ${errMsg(e)}`);
+      const sc = this.d.scorecard;
+      const input = {
+        roundId: this.round.id,
+        results: this.accounts.map((a) => ({ agentId: a.agentId, pnlBps: Math.round(a.pnlPct * 100), status: a.status })),
+        stateHash,
+        feeds,
+        offchainPrices,
+      };
+      // Same queue as the rail: the close has confirmed, and nothing else sends with the desk key meanwhile.
+      const r = await this.enqueueTx('Scorecard closeRound', () => sc.closeRound(input));
+      if (r.ok && r.value) {
+        this.scorecards.push(r.value);
+        this.emitEvent({ type: 'scorecard', ts: this.now(), tx: r.value });
+      } else if (r.error) {
+        this.log('error', `Scorecard closeRound failed: ${errMsg(r.error)}`);
       }
+    }
+
+    // Desk memory: write the round without blocking settlement.
+    if (this.d.memory) void this.rememberRound(this.roundReport());
+  }
+
+  // ---------- desk memory ----------
+
+  private get probationFactor(): number {
+    return this.cfg.probationBudgetFactor ?? 0.5;
+  }
+
+  /** Event multiplier for one agent: the shared multiplier, times the probation factor when it applies. */
+  private multiplierFor(a: AgentAccount): number {
+    return this.probation.has(a.agentId) ? this.multiplier * this.probationFactor : this.multiplier;
+  }
+
+  private memoryStatus(): NonNullable<DeskState['memoryStatus']> {
+    if (!this.d.memory) return { enabled: false, pendingCaptures: 0 };
+    if (this.memStatus.pendingCaptures > 0) void this.refreshPending(false);
+    return { ...this.memStatus };
+  }
+
+  private memError(msg: string): void {
+    // Message only; strip anything that looks like a credential.
+    this.memStatus.error = msg.replace(/(bearer\s+)?[A-Za-z0-9_\-]{32,}/gi, '[redacted]').slice(0, 300);
+    this.log('warn', this.memStatus.error);
+  }
+
+  /** Recalls every agent in parallel within 6 seconds overall. Late or failed recalls leave memory undefined. */
+  private async recallAll(atRoundStart = false): Promise<void> {
+    const mem = this.d.memory!;
+    const gen = this.memGen;
+    let open = true;
+    const recalls = this.accounts.map(async (a) => {
+      const r = await mem.safe('recallAgent', () => mem.client.recallAgent(a.agentId, a.name), (m) => this.memError(m));
+      if (!open || gen !== this.memGen || !r) return;
+      a.memory = { source: r.source, summary: r.summary, pages: r.pages, probation: r.probation, recalledAt: r.recalledAt };
+      if (atRoundStart && r.probation) {
+        this.probation.add(a.agentId);
+        const slug = r.pages[0]?.slug ?? 'unknown page';
+        this.log('warn', `${a.name} starts on probation: the desk's memory (Living Brain page ${slug}) records an earlier cut. Risk budget x ${this.probationFactor} and ${(this.cfg.evalMinTrades ?? 2) + 1} trades needed to be funded.`);
+      }
+    });
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      Promise.all(recalls),
+      new Promise<void>((res) => { timer = setTimeout(res, this.d.memoryRecallLimitMs ?? RECALL_LIMIT_MS); }),
+    ]);
+    clearTimeout(timer);
+    open = false;
+    this.memStatus.lastRecallAt = this.now();
+    await this.refreshPending(true);
+  }
+
+  private roundReport(): RoundReport {
+    const tx = this.scorecards.find((x) => x.roundId === this.round.id);
+    return {
+      roundId: this.round.id,
+      closedAt: this.now(),
+      eventMultiplier: this.multiplier,
+      ...(tx ? { scorecardTx: tx.txHash } : {}),
+      agents: this.accounts.map((a) => ({
+        agentId: a.agentId,
+        name: a.name,
+        strategy: this.d.agents.find((x) => x.agentId === a.agentId)?.strategy ?? a.strategy,
+        status: a.status,
+        pnlPct: Math.round(a.pnlPct * 100) / 100,
+        trades: this.fillCount.get(a.agentId) ?? 0,
+        rejectedOrders: this.rejectCount.get(a.agentId) ?? 0,
+        ...(a.cutReason ? { cutReason: a.cutReason } : {}),
+        ...(a.rogue ? { rogue: true } : {}),
+        notableRejections: [...(this.notableRejections.get(a.agentId) ?? [])],
+      })),
+    };
+  }
+
+  private async rememberRound(report: RoundReport): Promise<void> {
+    const mem = this.d.memory!;
+    const r = await mem.safe('rememberRound', () => mem.client.rememberRound(report), (m) => this.memError(m));
+    if (!r) return;
+    this.memStatus.lastWriteAt = this.now();
+    delete this.memStatus.error;
+    this.log('info', `Round written to desk memory: ${r.length} captures sent to Living Brain.`);
+    await this.refreshPending(true);
+  }
+
+  /** Refreshes pendingCaptures at most every 20 seconds (or now when forced). Never throws. */
+  private async refreshPending(force: boolean): Promise<void> {
+    const mem = this.d.memory;
+    if (!mem || this.pendingInFlight) return;
+    if (!force && this.now() - this.pendingCheckedAt < PENDING_REFRESH_MS) return;
+    this.pendingInFlight = true;
+    this.pendingCheckedAt = this.now();
+    try {
+      const p = await mem.safe('pendingSources', () => mem.client.pendingSources(), (m) => this.memError(m));
+      if (p) this.memStatus.pendingCaptures = p.length;
+    } finally {
+      this.pendingInFlight = false;
     }
   }
 }

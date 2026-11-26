@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { ControlAction, DeskEvent } from '../../../shared/src/types.ts';
-import type { Desk } from './desk.ts';
+import type { Desk, EngineControl } from './desk.ts';
 import { errMsg } from './desk.ts';
 
 const CORS = {
@@ -18,7 +18,7 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 
 const AGENT_IDS = new Set(['momentum', 'rwa', 'event']);
 
-export function parseControl(body: unknown): ControlAction {
+export function parseControl(body: unknown): EngineControl {
   const b = body as Record<string, unknown> | null;
   if (!b || typeof b !== 'object' || typeof b.action !== 'string') throw new Error('Body must be a JSON ControlAction');
   switch (b.action) {
@@ -27,6 +27,8 @@ export function parseControl(body: unknown): ControlAction {
     case 'reset':
     case 'close-round':
       return { action: b.action };
+    case 'recall':
+      return { action: 'recall' };
     case 'rogue':
       if (typeof b.agentId !== 'string' || !AGENT_IDS.has(b.agentId)) throw new Error('rogue needs agentId: momentum, rwa or event');
       return { action: 'rogue', agentId: b.agentId as 'momentum' | 'rwa' | 'event' };
@@ -83,7 +85,7 @@ export function createServer(desk: Desk): http.Server {
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/control') {
-        let action: ControlAction;
+        let action: EngineControl;
         try {
           action = parseControl(await readBody(req));
         } catch (e) {

@@ -1,9 +1,9 @@
 import type { DeskState } from '../types';
-import { amount, money2, money3 } from '../format';
+import { amount, money2, money3, assetLabel } from '../format';
 
 export function Economics({ desk }: { desk: DeskState }) {
   const e = desk.economics;
-  const asset = desk.config.asset.toUpperCase();
+  const asset = assetLabel(desk);
   const fig = (v: string | undefined, d = money3): string => (v === undefined ? '-' : `${d(amount(v))} ${asset}`);
   const items: [string, string][] = [
     ['Pot', `${money2(amount(desk.config.realPot))} ${asset}`],

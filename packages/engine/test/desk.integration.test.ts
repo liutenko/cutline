@@ -62,6 +62,7 @@ test('full round on dev stand-ins: evaluate, fund, rogue blocked, shock cut, clo
     await desk.tick();
     checkRail();
   }
+  await desk.whenRailIdle();
   const st1 = desk.state();
   assert.equal(st1.round.phase, 'funded');
   for (const a of st1.agents) assert.equal(a.equityHistory!.length, config.evalTicks + 1);
@@ -124,6 +125,7 @@ test('full round on dev stand-ins: evaluate, fund, rogue blocked, shock cut, clo
   assert.ok(target, 'a funded agent should hold a position');
   const shockPct = -Math.min(90, Math.ceil((8 / target.w)));
   await desk.control({ action: 'shock', symbol: target.p.symbol, pct: shockPct });
+  await desk.whenRailIdle();
   checkRail();
   const cutEv = events.find((e) => e.type === 'cut' && e.agentId === target.a.agentId);
   assert.ok(cutEv, `expected ${target.a.agentId} to be cut after a ${shockPct}% shock on ${target.p.symbol}`);

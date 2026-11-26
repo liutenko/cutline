@@ -1,5 +1,5 @@
-// On-chain links shown on the dashboard: Yellow deposit/withdrawal txs and the Scorecard deployment.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+// On-chain links shown on the dashboard: the Scorecard and DeskVault deployments on BNB Smart Chain testnet.
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 export interface OnchainLink {
@@ -21,28 +21,36 @@ function readJson(file: string): unknown {
   }
 }
 
-const isLink = (x: unknown): x is OnchainLink =>
-  !!x && typeof x === 'object' &&
-  typeof (x as OnchainLink).label === 'string' &&
-  typeof (x as OnchainLink).explorerUrl === 'string' &&
-  typeof (x as OnchainLink).txHash === 'string';
+type Deployed = { address?: unknown; txHash?: unknown; chainId?: unknown };
+const obj = (x: unknown): Deployed | null => (x && typeof x === 'object' ? (x as Deployed) : null);
 
-/** Reads data/proofs/yellow/onchain.json and contracts/deployments/*.json. Missing or malformed files give no links. */
+function link(label: string, d: Deployed | null, chainId: unknown): OnchainLink | null {
+  if (!d || typeof d.txHash !== 'string' || !d.txHash) return null;
+  const ex = typeof chainId === 'number' ? EXPLORERS[chainId] : undefined;
+  if (!ex) return null;
+  const at = typeof d.address === 'string' && d.address ? ` at ${d.address}` : '';
+  return { label: `${label} deployed on ${ex.name}${at}`, explorerUrl: `${ex.url}/tx/${d.txHash}`, txHash: d.txHash };
+}
+
+/**
+ * Reads contracts/deployments/bscTestnet.json (Scorecard) and contracts/deployments/bscTestnet-vault.json
+ * (DeskVault and its Test USD token). The vault file may hold the vault at the top level or under
+ * `vault`/`deskVault`, and the token under `token`/`testUsd`/`tusd`; chainId at the top or per entry.
+ * Missing or malformed files give no links.
+ */
 export function loadOnchainLinks(repoRoot: string): OnchainLink[] {
-  const links: OnchainLink[] = [];
-  const yellow = readJson(path.join(repoRoot, 'data', 'proofs', 'yellow', 'onchain.json'));
-  if (Array.isArray(yellow)) links.push(...yellow.filter(isLink).map((l) => ({ label: l.label, explorerUrl: l.explorerUrl, txHash: l.txHash })));
   const dir = path.join(repoRoot, 'contracts', 'deployments');
-  if (existsSync(dir)) {
-    for (const f of readdirSync(dir).filter((x) => x.endsWith('.json')).sort()) {
-      const d = readJson(path.join(dir, f)) as { address?: string; chainId?: number; txHash?: string } | null;
-      if (!d || typeof d.txHash !== 'string' || typeof d.chainId !== 'number') continue;
-      const ex = EXPLORERS[d.chainId];
-      if (!ex) continue;
-      links.push({ label: `Scorecard contract deployed on ${ex.name}${d.address ? ` at ${d.address}` : ''}`, explorerUrl: `${ex.url}/tx/${d.txHash}`, txHash: d.txHash });
-    }
+  const links: (OnchainLink | null)[] = [];
+  const sc = obj(readJson(path.join(dir, 'bscTestnet.json')));
+  if (sc) links.push(link('Scorecard contract', sc, sc.chainId));
+  const v = obj(readJson(path.join(dir, 'bscTestnet-vault.json'))) as (Deployed & Record<string, unknown>) | null;
+  if (v) {
+    const vault = obj(v.vault) ?? obj(v.deskVault) ?? v;
+    const token = obj(v.token) ?? obj(v.testUsd) ?? obj(v.tusd);
+    links.push(link('DeskVault contract', vault, vault.chainId ?? v.chainId));
+    links.push(link('Test USD token', token, token?.chainId ?? v.chainId));
   }
-  return links;
+  return links.filter((l): l is OnchainLink => l !== null);
 }
 
 /** Re-reads the files at most every `ttlMs`, so new transactions appear without a restart. */

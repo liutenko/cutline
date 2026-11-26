@@ -9,7 +9,7 @@ import type {
 import { normalizeAllocations, parseAmount, toStrings, validateParticipants } from './amounts.js';
 
 /**
- * In-memory settlement rail with the same semantics as the Yellow rail:
+ * In-memory settlement rail with the same semantics as the vault rail:
  * open puts the full amount with the desk, reallocate conserves the total and bumps the version,
  * close settles a final split and marks the session closed. Nothing leaves the process.
  */

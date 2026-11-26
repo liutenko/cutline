@@ -1,14 +1,14 @@
 // The one place where the engine meets the other packages (data, rail, contracts).
 // DATA=dev may fall back to in-package dev stand-ins with a clear warning.
-// DATA=live, DATA=replay and any Yellow rail never fall back: a missing package is a hard error.
+// DATA=live, DATA=replay and the vault rail never fall back: a missing package is a hard error.
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config as loadDotenv } from 'dotenv';
-import { keccak256, toBytes, type Hex } from 'viem';
+import { createPublicClient, http, keccak256, toBytes, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { AgentId, DataProvider, MarketSnapshot, RailName, SettlementRail } from '../../../shared/src/types.ts';
-import { Desk, DEFAULT_AGENTS, errMsg, type AgentSpec, type DeskDeps, type ScorecardPort } from './desk.ts';
+import { assetLabel, Desk, DEFAULT_AGENTS, errMsg, type AgentSpec, type DeskDeps, type MemoryPort, type SafeFn, type ScorecardPort } from './desk.ts';
 import { configFromEnv } from './config.ts';
 import { DevSimProvider } from './dev/DevSimProvider.ts';
 import { DevRail } from './dev/DevRail.ts';
@@ -23,6 +23,9 @@ export const ENV_PATH = path.join(REPO_ROOT, '.env');
 const DATA_ENTRY = '../../data/src/index.ts';
 const RAIL_ENTRY = '../../rail/src/index.ts';
 const SCORECARD_ENTRY = '../../../contracts/src/client.ts';
+const SCORECARD_ABI = '../../../contracts/src/abi.ts';
+const CHAINS_ENTRY = '../../../contracts/src/chains.ts';
+const MEMORY_ENTRY = '../../memory/src/index.ts';
 
 export type DataMode = 'dev' | 'live' | 'replay';
 type Env = Record<string, string | undefined>;
@@ -59,6 +62,21 @@ async function tryImport(spec: string): Promise<Record<string, unknown>> {
   return (await import(spec)) as Record<string, unknown>;
 }
 
+/** Read-only Scorecard.getAgent, so the desk registers agents only when the contract lacks them. */
+async function scorecardReader(env: Env, address: Hex, toId: (id: string) => Hex): Promise<NonNullable<ScorecardPort['readAgent']>> {
+  const [{ scorecardAbi }, { NETWORKS }] = await Promise.all([tryImport(SCORECARD_ABI), tryImport(CHAINS_ENTRY)]);
+  const nets = NETWORKS as Record<string, { rpcEnv: string; defaultRpc: string }>;
+  const net = nets[env.SCORECARD_NETWORK?.trim() || 'bscTestnet'];
+  if (!net) throw new Error(`Unknown SCORECARD_NETWORK "${env.SCORECARD_NETWORK}"`);
+  const pub = createPublicClient({ transport: http(env[net.rpcEnv]?.trim() || net.defaultRpc) });
+  return async (agentId) => {
+    const [name, agentAddr, strategy, exists] = (await pub.readContract({
+      address, abi: scorecardAbi as never, functionName: 'getAgent', args: [toId(agentId)],
+    } as never)) as [string, string, string, boolean];
+    return { name, address: agentAddr, strategy, exists };
+  };
+}
+
 export interface Wiring {
   deps: DeskDeps;
   /** The shared LLM gate, when the LLM layer is on. */
@@ -76,8 +94,8 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
   const data = (env.DATA?.trim() || 'live') as DataMode;
   if (!['dev', 'live', 'replay'].includes(data)) throw new Error(`DATA must be dev, live or replay (got "${data}")`);
   const railName = (env.RAIL?.trim() || 'local') as RailName;
-  if (!['local', 'yellow-sandbox', 'yellow-mainnet'].includes(railName)) {
-    throw new Error(`RAIL must be local, yellow-sandbox or yellow-mainnet (got "${railName}")`);
+  if (!['local', 'bnb-testnet-vault'].includes(railName)) {
+    throw new Error(`RAIL must be local or bnb-testnet-vault (got "${railName}")`);
   }
   const config = configFromEnv(env);
 
@@ -140,6 +158,15 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
     const create = mod.createScorecardClient as ((e: Env) => ScorecardPort | null) | undefined;
     if (typeof create !== 'function') throw new Error('contracts/src/client.ts does not export createScorecardClient');
     scorecard = create(env);
+    const sc = scorecard as (ScorecardPort & { address?: Hex }) | null;
+    const toId = mod.agentIdToBytes32 as ((id: string) => Hex) | undefined;
+    if (sc && !sc.readAgent && sc.address && typeof toId === 'function') {
+      try {
+        sc.readAgent = await scorecardReader(env, sc.address, toId);
+      } catch (e) {
+        warn(`Scorecard registration check unavailable (${errMsg(e)}); agents are registered at every start.`);
+      }
+    }
     summary.push(scorecard ? 'scorecard: Scorecard contract client (contracts)' : 'scorecard: not configured (SCORECARD_ADDRESS empty)');
   } catch (e) {
     if (data !== 'dev' && env.SCORECARD_ADDRESS?.trim()) {
@@ -150,6 +177,24 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
 
   const scorecardFeeds = parseFeeds(env.SCORECARD_FEEDS, warn);
   if (scorecard) summary.push(`scorecard feeds: ${Object.keys(scorecardFeeds).sort().join(', ') || 'none (empty arrays)'}`);
+
+  // ---- desk memory (Living Brain) ----
+  // Optional in every mode: a missing package or no key means memory is off, never an error.
+  let memory: DeskDeps['memory'] = null;
+  try {
+    const mod = await tryImport(MEMORY_ENTRY);
+    const create = mod.createDeskMemory as ((e: Env) => MemoryPort | null) | undefined;
+    const safeFn = mod.safe as SafeFn | undefined;
+    const client = typeof create === 'function' ? create(env) : null;
+    if (client && typeof safeFn === 'function') {
+      memory = { client, safe: safeFn };
+      summary.push('memory: Living Brain desk memory on (brain "cutline-desk")');
+    } else {
+      summary.push('memory: off (no Living Brain key)');
+    }
+  } catch (e) {
+    summary.push(`memory: off (packages/memory unavailable: ${errMsg(e).slice(0, 120)})`);
+  }
 
   // ---- participants ----
   const deskAddress = addressFromKey(env, 'DESK_KEY', data, warn);
@@ -190,8 +235,9 @@ export async function wire(env: Env = loadEnv(), opts: { warn?: Warn } = {}): Pr
     onchainLinks: cachedOnchainLinks(REPO_ROOT),
     scorecardFeeds,
     llmStats: gate ? () => gate!.stats() : undefined,
+    memory,
   };
-  summary.push(`config: evalTicks ${config.evalTicks}, tickMs ${config.tickMs}, pot ${config.realPot} ${config.asset.toUpperCase()}, band ${brainOptions.bandPct}%, rebalance ${brainOptions.rebalancePp} pts, re-entry ${brainOptions.reentryTicks} ticks`);
+  summary.push(`config: evalTicks ${config.evalTicks}, tickMs ${config.tickMs}, pot ${config.realPot} ${assetLabel(railName, config.asset)}, band ${brainOptions.bandPct}%, rebalance ${brainOptions.rebalancePp} pts, re-entry ${brainOptions.reentryTicks} ticks`);
   return { deps, summary, gate };
 }
 

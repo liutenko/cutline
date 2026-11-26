@@ -1,17 +1,17 @@
 import type { DeskState } from '../types';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '../config';
-import { amount, clock, dateTime, money2 } from '../format';
+import { amount, clock, dateTime, money2, assetLabel } from '../format';
 
 const PHASE: Record<DeskState['round']['phase'], string> = {
   idle: 'Not started', evaluation: 'Evaluation', funded: 'Funded trading', settled: 'Settled',
 };
 const RAIL: Record<DeskState['rail'], string> = {
-  local: 'Local rail', 'yellow-sandbox': 'Yellow sandbox rail', 'yellow-mainnet': 'Yellow mainnet rail',
+  local: 'Local ledger (dev)', 'bnb-testnet-vault': 'DeskVault on BSC testnet',
 };
 
 export function Header({ desk, mock }: { desk: DeskState; mock: boolean }) {
   const pot = amount(desk.config.realPot);
-  const asset = desk.config.asset.toUpperCase();
+  const asset = assetLabel(desk);
   const deployed = desk.agents.reduce((t, a) => t + amount(a.realAllocation), 0);
   const reserveRaw = desk.railState?.allocations.desk;
   const reserve = reserveRaw !== undefined ? amount(reserveRaw) : pot - deployed;
@@ -33,6 +33,7 @@ export function Header({ desk, mock }: { desk: DeskState; mock: boolean }) {
             <span className="tag">Replay of live data recorded {replayTs ? dateTime(replayTs) : 'earlier'}</span>
           )}
           <span className="tag">{RAIL[desk.rail]}</span>
+          {desk.llm?.active && <span className="muted small mono">Claude calls {desk.llm.calls} / {desk.llm.cap}</span>}
         </div>
         <div className="round">
           <span className="label" title={`Round id ${desk.round.id}`}>{desk.round.startedAt ? `Round started ${clock(desk.round.startedAt)}` : 'Round not started'}</span>

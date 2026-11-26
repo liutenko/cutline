@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { assetLabel } from './format';
 import { PRODUCT_NAME } from './config';
 import { Economics } from './components/Economics';
 import { createEngineSource, ENGINE_URL } from './source';
@@ -10,6 +11,7 @@ import { Tape } from './components/Tape';
 import { EventRiskPanel } from './components/EventRisk';
 import { MarketStrip } from './components/Market';
 import { SettlementPanel } from './components/Settlement';
+import { MemoryPanel } from './components/MemoryPanel';
 import { Controls } from './components/Controls';
 
 const params = new URLSearchParams(window.location.search);
@@ -46,7 +48,7 @@ export default function App() {
       <main className={`board ${offline ? 'stale' : ''}`}>
         <div className="col-left">
           <Economics desk={desk} />
-          <Leaderboard agents={desk.agents} config={desk.config} phase={desk.round.phase} history={history} cutAt={cutAt} />
+          <Leaderboard agents={desk.agents} config={desk.config} phase={desk.round.phase} memoryOn={desk.memoryStatus?.enabled === true} asset={assetLabel(desk)} history={history} cutAt={cutAt} />
         </div>
         <div className="col-main">
           <Tape events={desk.events} agents={desk.agents} />
@@ -54,10 +56,11 @@ export default function App() {
         <div className="col-side">
           <EventRiskPanel events={desk.snapshot?.eventRisk ?? []} multiplier={desk.eventMultiplier} />
           <SettlementPanel desk={desk} />
+          <MemoryPanel desk={desk} />
         </div>
       </main>
       <footer className="foot">
-        <p>Trades are paper trades at live prices. Capital, cut-offs, payouts and scorecards are real.</p>
+        <p>{desk.rail === 'bnb-testnet-vault' ? 'Trades are paper trades at live prices. Capital (test tokens on BNB Smart Chain testnet), cut-offs, payouts and scorecards are on-chain.' : 'Trades are paper trades at live prices. Capital is a local ledger in this mode.'}</p>
         <Controls desk={desk} send={source.control} />
       </footer>
     </div>

@@ -55,7 +55,14 @@ export function createEngineSource(): DeskSource {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(a),
       });
-      if (!r.ok) throw new Error(`Engine answered HTTP ${r.status}`);
+      if (!r.ok) {
+        let msg = `Engine answered HTTP ${r.status}`;
+        try {
+          const j = (await r.json()) as { error?: string; message?: string };
+          msg = j.error ?? j.message ?? msg;
+        } catch { /* keep default */ }
+        throw new Error(msg);
+      }
     },
   };
 }

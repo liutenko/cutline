@@ -4,9 +4,9 @@ Last updated: 2026-11-26
 
 ## Problem and audience
 
-BNB Chain has agent tooling and trading contests, but a winning agent has nowhere to go for capital, and capital cannot tell a good agent from a lucky one. Human traders have the prop desk. Kraken Prop has no API, so agents cannot use it. Propr takes agents, on Hyperliquid perps.
+BNB Chain has agent tooling and trading contests, but a winning agent has nowhere to go for capital, and capital cannot tell a good agent from a lucky one. Human traders have the prop desk. Exchange-run prop programs exist for human traders, and they are built for manual trading.
 
-Our audience is the capital owner (an exchange, a foundation, a DEX, a tokenized-asset issuer) that wants to fund agents with its own money. Trades are paper trades at live prices. The data, risk decisions, capital, cut-off, payout and scorecard are real.
+Our audience is the capital owner (an exchange, a foundation, a DEX, a tokenized-asset issuer) that wants to fund agents with its own money. Trades are paper trades at live prices. The data and risk decisions are real. Capital, cut-off, payout and scorecard are on-chain on BNB Smart Chain testnet, with test tokens.
 
 ## Endpoints and feeds, and why
 
@@ -33,13 +33,15 @@ Cournot sets an event-risk multiplier (about 0.51 today) on every agent's risk b
 
 Explorer: https://testnet.bscscan.com.
 
-The Scorecard (`contracts/contracts/Scorecard.sol`) is deployed on BSC testnet and tested (7 passing tests). The `closeRound` round (success, 3 AgentResult, 3 PriceStamp, 1 RoundClosed) came from a live-data run. It holds no funds. It stores rounds played, rounds funded, times cut and cumulative P&L per agent, and stamps each feed's on-chain answer next to the off-chain price. An unreadable feed never blocks the close.
+The desk's pot is held by the DeskVault contract (`0x3c7ff14381299ffeb2d0c3b187f931bddc9fcbe2`) in a test stablecoin (`0x61377805405038a67d7e44a66c1d8530593ade0f`, no value). No allocation changes without the desk's transaction and the risk manager's EIP-712 signature. One full round ran on testnet: open, fund, cut, close and scorecard, each a transaction (links in the README, "One full round on-chain").
+
+The Scorecard (`contracts/contracts/Scorecard.sol`) is deployed on BSC testnet and tested. The `closeRound` round (success, 3 AgentResult, 3 PriceStamp, 1 RoundClosed) came from a live-data run. It holds no funds. It stores rounds played, rounds funded, times cut and cumulative P&L per agent, and stamps each feed's on-chain answer next to the off-chain price. An unreadable feed never blocks the close.
 
 BNB Chain data used: mainnet token contracts for all eight instruments, mainnet Atlas feeds, and DEX liquidity.
 
 ## What we would build next
 
-1. Run the full funded flow end to end on the Yellow rail.
+1. Move to mainnet with real funds, and move allocation updates off-chain over state channels with the vault as the on-chain anchor.
 2. Live execution on BNB Chain DEXs, sized by the same liquidity check, so the paper step becomes a real fill.
 3. A first desk run by a capital owner with its own money, reading one shared agent record.
 4. Accept agents built with BNB Agent Studio or any framework through the same order interface.

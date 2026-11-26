@@ -16,8 +16,9 @@ function Meter({ label, value, limit }: { label: string; value: number; limit: n
   );
 }
 
-export function Leaderboard({ agents, config, phase, history, cutAt }: { agents: AgentAccount[]; config: DeskConfig; phase: DeskState['round']['phase'] } & AccountView) {
-  const rank = [...agents].sort((a, b) => (a.status === 'cut' ? 1 : 0) - (b.status === 'cut' ? 1 : 0) || b.pnlPct - a.pnlPct);
+export function Leaderboard({ agents, config, phase, memoryOn, asset, history, cutAt }: { agents: AgentAccount[]; config: DeskConfig; phase: DeskState['round']['phase']; memoryOn: boolean; asset: string } & AccountView) {
+  const order: Record<AgentAccount['status'], number> = { funded: 0, evaluating: 1, cut: 2 };
+  const rank = [...agents].sort((a, b) => order[a.status] - order[b.status] || b.pnlPct - a.pnlPct);
   const rules = [
     `Funded after ${config.evalTicks} ticks`
       + (config.evalMinTrades !== undefined ? ` with at least ${config.evalMinTrades} trades` : '')
@@ -45,14 +46,21 @@ export function Leaderboard({ agents, config, phase, history, cutAt }: { agents:
                 <span className="rank mono">{i + 1}</span>
                 <h3>{a.name}</h3>
                 <span className="a-strat muted small" title={a.strategy}>{a.strategy}</span>
+                {a.memory?.probation && <span className="status s-probation">Probation</span>}
                 <span className={`status s-${a.status}`}>{STATUS[a.status]}</span>
               </div>
+              {a.memory ? (
+                <div className="a-mem">
+                  <p className="mem-line"><span className="mem-label">Desk memory</span><em title={a.memory.summary}>{a.memory.summary}</em>{a.memory.pages[0] && <span className="mono small muted mem-page"> page {a.memory.pages[0].slug}{a.memory.pages[0].version !== undefined ? ` v${a.memory.pages[0].version}` : ''}</span>}</p>
+                  {a.memory.probation && <p className="small prob-note">Risk budget at {Math.round((config.probationBudgetFactor ?? 0.5) * 100)}% this round: an earlier cut is on record.</p>}
+                </div>
+              ) : memoryOn ? <p className="small muted a-mem">Desk memory: no record yet</p> : null}
               <div className="a-l2">
                 <div className="eq-fig">
                   <span className="big">{usd(a.equityUsd)}</span>
                   <span className={`mono pnl ${tone}`}>{pct(a.pnlPct, 2, true)} <span className="small">{signedUsd(a.pnlUsd)}</span></span>
                 </div>
-                <Sparkline values={hist} baseline={a.startEquityUsd} tone={tone} width={150} height={34} />
+                <Sparkline values={hist} baseline={a.startEquityUsd} tone={tone} width={150} height={28} />
               </div>
               <div className="a-l3">
                 <Meter label="Drawdown" value={a.drawdownPct} limit={config.maxDrawdownPct} />
@@ -60,7 +68,7 @@ export function Leaderboard({ agents, config, phase, history, cutAt }: { agents:
               </div>
               <dl className="a-l4">
                 <div><dt>Risk budget</dt><dd className="mono">{a.status === 'cut' ? 'none' : usd(a.riskBudgetUsd)}</dd></div>
-                <div><dt>{phase === 'settled' ? 'Paid out' : 'Real capital'}</dt><dd className="mono">{money3(realAmt)} {config.asset.toUpperCase()}{scale > 0 && <span className="muted small"> = {usd(realAmt / scale)} paper</span>}</dd></div>
+                <div><dt>{phase === 'settled' ? 'Paid out' : 'Real capital'}</dt><dd className="mono">{money3(realAmt)} {asset}{scale > 0 && <span className="muted small"> = {usd(realAmt / scale)} paper</span>}</dd></div>
               </dl>
               {a.status === 'cut' && <p className="cut-reason"><strong>Cut.</strong> {a.cutReason ?? 'Reason not reported by the engine.'}</p>}
               {a.status !== 'cut' && a.evalNote && <p className="cut-reason warn">{a.evalNote}</p>}

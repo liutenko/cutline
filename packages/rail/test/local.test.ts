@@ -109,5 +109,5 @@ test('state() returns a copy', async () => {
 test('createRail returns the right implementation and rejects unknown names', () => {
   assert.equal(createRail('local', {}).name, 'local');
   assert.throws(() => createRail('nope' as never, {}), /unknown rail/);
-  assert.throws(() => createRail('yellow-sandbox', {}), /DESK_KEY/);
+  assert.throws(() => createRail('bnb-testnet-vault', {}), /DESK_KEY/);
 });

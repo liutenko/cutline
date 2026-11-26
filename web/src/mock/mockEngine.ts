@@ -1,7 +1,7 @@
 // In-browser stand-in for the engine, enabled only with ?mock=1.
 // Everything it produces is invented and the page labels it "MOCK DATA".
 import type {
-  AgentAccount, AgentId, ControlAction, DeskConfig, DeskEvent, DeskState, EventRisk, Hex, MarketSnapshot,
+  AgentAccount, ControlAction, AgentId, DeskConfig, DeskEvent, DeskState, EventRisk, Hex, MarketSnapshot,
   Order, PriceMark, RailReceipt, RiskCheck, RiskDecision,
 } from '../types';
 import type { DeskSource } from '../source';
@@ -29,7 +29,7 @@ const AGENTS: { id: AgentId; name: string; strategy: string; address: Hex }[] = 
 const CONFIG: DeskConfig = {
   paperAccountUsd: 25000, realPot: '10', realAllocationPerAgent: '3', asset: 'usdt', profitSplitAgent: 0.8,
   maxDrawdownPct: 6, dailyLossLimitPct: 3, maxOrderPctOfLiquidity: 2, priceToleranceBps: 50, maxConcentrationPct: 40,
-  baseRiskBudgetPct: 100, minEventMultiplier: 0.25, evalTicks: 6, tickMs: 1400, evalMinTrades: 3, evalMinPnlPct: 0, poolFeePct: 0.25,
+  baseRiskBudgetPct: 100, minEventMultiplier: 0.25, evalTicks: 6, tickMs: 1400, evalMinTrades: 3, evalMinPnlPct: 0, poolFeePct: 0.25, probationBudgetFactor: 0.5,
 };
 
 function rng(seed: number): () => number {
@@ -60,6 +60,11 @@ class Sim {
   private orderSeq = 0;
   private adj: Record<string, number> = {};
   private closing = false;
+  private llmCalls = 0;
+  private pending = 0;
+  private links: { label: string; explorerUrl: string; txHash: Hex }[] = [];
+  private lastRecallAt = 0;
+  private lastWriteAt = 0;
   constructor(private speed: number, private emitState: (s: DeskState) => void, private emitEvent: (e: DeskEvent) => void) {
     this.init();
   }
@@ -72,6 +77,11 @@ class Sim {
     this.fg = 38;
     this.orderSeq = 0;
     this.closing = false;
+    this.llmCalls = 0;
+    this.pending = 0;
+    this.links = [];
+    this.lastRecallAt = Date.now();
+    this.lastWriteAt = 0;
     const now = Date.now();
     const marks: Record<string, PriceMark> = {};
     const liquidity: MarketSnapshot['liquidity'] = {};
@@ -85,13 +95,23 @@ class Sim {
       startEquityUsd: 25000, cashUsd: 25000, positions: [], equityUsd: 25000, peakEquityUsd: 25000, dayStartEquityUsd: 25000,
       pnlUsd: 0, pnlPct: 0, drawdownPct: 0, dailyLossPct: 0, riskBudgetUsd: 25000, realAllocation: '0', equityHistory: [25000],
     }));
+    agents[0]!.memory = {
+      source: 'Living Brain', probation: true, recalledAt: now,
+      summary: 'Cut in round 3 for a 6.2% drawdown after sizing up into a thin token. Keeps trend exposure small since then.',
+      pages: [{ slug: 'momentum-agent', version: 3, title: 'Momentum agent record' }],
+    };
+    agents[1]!.memory = {
+      source: 'Living Brain', probation: false, recalledAt: now,
+      summary: 'Two rounds funded, no breaches. Rotates into gold early when fear is high and stays inside its budget.',
+      pages: [{ slug: 'rwa-agent', version: 2, title: 'Real-world assets agent record' }],
+    };
     this.brains = {
       momentum: { acct: agents[0]!, rogueSteps: 0, startedTick: null, cool: 0 },
       rwa: { acct: agents[1]!, rogueSteps: 0, startedTick: null, cool: 0 },
       event: { acct: agents[2]!, rogueSteps: 0, startedTick: null, cool: 0 },
     };
     this.s = {
-      mode: 'live', rail: 'yellow-sandbox', running: false,
+      mode: 'live', rail: 'bnb-testnet-vault', running: false,
       round: { id: 1, tick: 0, phase: 'idle', startedAt: null },
       config: CONFIG, eventMultiplier: 1, agents,
       snapshot: { ts: now, marks, liquidity, mode: 'live', fearGreed: this.fg, eventRisk: this.initialEvents(now) },
@@ -117,7 +137,7 @@ class Sim {
         fetchedAt: now - 3 * 3600_000, requestId: 'mock-req-0001',
         cournotExplanation: 'Mock explanation: recent trade talks reduced the near-term odds of new tariffs.',
         sources: [
-          { title: 'Trade talks resume with no date for new measures', url: 'https://example.com/news/trade-talks' },
+          { title: 'Trade talks resume with no date for new measures', url: 'https://example.com/news/trade-talks', snippet: 'Negotiators met for a third day without naming a date for any new tariff measures.' },
           { title: 'Commerce department statement on electronics imports', url: 'https://example.com/gov/electronics' },
         ],
       },
@@ -170,7 +190,7 @@ class Sim {
       a.pnlPct = (a.pnlUsd / a.startEquityUsd) * 100;
       a.drawdownPct = Math.max(0, ((a.peakEquityUsd - a.equityUsd) / a.peakEquityUsd) * 100);
       a.dailyLossPct = Math.max(0, ((a.dayStartEquityUsd - a.equityUsd) / a.dayStartEquityUsd) * 100);
-      a.riskBudgetUsd = a.status === 'cut' ? 0 : (a.equityUsd * CONFIG.baseRiskBudgetPct) / 100 * mult;
+      a.riskBudgetUsd = a.status === 'cut' ? 0 : (a.equityUsd * CONFIG.baseRiskBudgetPct) / 100 * mult * (a.memory?.probation ? (CONFIG.probationBudgetFactor ?? 1) : 1);
     }
     snap.ts = Date.now();
     snap.fearGreed = Math.round(this.fg);
@@ -233,6 +253,7 @@ class Sim {
 
   private submit(a: AgentAccount, symbol: string, side: 'buy' | 'sell', notional: number, rationale: string): boolean {
     const o: Order = { id: `ord-${++this.orderSeq}`, agentId: a.agentId, symbol, side, notionalUsd: Math.round(notional), rationale, brain: a.agentId === 'event' ? 'llm' : 'rule', ts: Date.now() };
+    if (o.brain === 'llm') this.llmCalls += 1;
     this.emit({ type: 'order', ts: o.ts, order: o });
     const checks = this.checks(o, a);
     const decision: RiskDecision = { orderId: o.id, approved: checks.every((c) => c.pass), checks };
@@ -311,7 +332,7 @@ class Sim {
       a.requestId = 'mock-req-0003';
       a.cournotExplanation = 'Mock explanation: a new customs notice and a senator\'s statement raised the odds of tariffs before the deadline.';
       a.sources = [
-        { title: 'Customs notice lists electronics categories under review', url: 'https://example.com/news/customs-notice' },
+        { title: 'Customs notice lists electronics categories under review', url: 'https://example.com/news/customs-notice', snippet: 'A notice published this week lists phones and laptops among categories under review.' },
         { title: 'Senator calls for action before year end', url: 'https://example.com/news/senator' },
         { title: 'Trade talks stall over export controls', url: 'https://example.com/news/talks-stall' },
       ];
@@ -359,14 +380,16 @@ class Sim {
     rs.version += 1;
     rs.allocations = p.allocations;
     if (p.kind === 'close') rs.status = 'closed';
-    const tx = p.onchain ? (`0x${hex(this.r, 64)}` as Hex) : undefined;
+    const tx = `0x${hex(this.r, 64)}` as Hex;
     const rc: RailReceipt = {
-      kind: p.kind, rail: this.s.rail, sessionId: rs.sessionId, version: rs.version, offchain: p.offchain,
-      txHash: tx, explorerUrl: tx ? `https://testnet.bscscan.com/tx/${tx}` : undefined,
+      kind: p.kind, rail: this.s.rail, sessionId: rs.sessionId, version: rs.version, offchain: false,
+      txHash: tx, explorerUrl: `https://testnet.bscscan.com/tx/${tx}`,
       memo: p.memo, allocations: { ...p.allocations }, ts: Date.now(),
     };
     this.s.receipts.push(rc);
     this.s.receipts = this.s.receipts.slice(-200);
+    this.pending += 1;
+    setTimeout(() => { this.pending = Math.max(0, this.pending - 1); }, 1600 / this.speed);
     this.emit({ type: 'rail', ts: rc.ts, receipt: rc });
   }
 
@@ -499,6 +522,7 @@ class Sim {
     for (const a of s.agents) a.realAllocation = final[a.agentId]!;
     s.running = false;
     s.round.phase = 'settled';
+    this.lastWriteAt = Date.now();
     this.receipt({ kind: 'close', offchain: false, allocations: final, memo: 'Round closed, one settlement', onchain: true });
     this.emitState(this.snapshot());
     setTimeout(() => {
@@ -518,6 +542,7 @@ class Sim {
           s.round.phase = 'evaluation';
           s.round.startedAt = Date.now();
           s.railState = { sessionId: `mock-${hex(this.r, 8)}`, version: 0, asset: 'usdt', status: 'open', allocations: {} };
+          this.links = ['DeskVault contract', 'Test token (tUSD)', 'Scorecard contract'].map((label) => { const h = `0x${hex(this.r, 64)}` as Hex; return { label, txHash: h, explorerUrl: `https://testnet.bscscan.com/tx/${h}` }; });
           this.receipt({ kind: 'open', offchain: false, onchain: true, memo: 'Pot deposited to the desk',
             allocations: { desk: '10.00', risk: '0.00', momentum: '0.00', rwa: '0.00', event: '0.00' } });
         }
@@ -550,6 +575,11 @@ class Sim {
         }
         break;
       }
+      case 'recall':
+        if (s.round.phase === 'evaluation' || s.round.phase === 'funded') throw new Error('Recall is only allowed outside a round (409).');
+        this.lastRecallAt = Date.now();
+        this.emit({ type: 'log', ts: Date.now(), level: 'info', message: 'Desk memory recalled for every agent.' });
+        break;
       case 'close-round':
         if (s.round.phase !== 'idle') this.closeRound();
         break;
@@ -563,6 +593,10 @@ class Sim {
     const fundedAlloc = funded.reduce((t, a) => t + Number(a.realAllocation), 0);
     const paid = this.s.round.phase === 'settled' ? this.s.agents.reduce((t, a) => t + Number(a.realAllocation), 0) : 0;
     const lost = this.s.agents.filter((a) => a.status === 'cut').reduce((t, a) => t + Math.min(3, Math.max(0, (a.startEquityUsd - a.equityUsd) * scale)), 0);
+    this.s.memoryStatus = { enabled: true, brainName: 'proving-ground-desk', pendingCaptures: this.s.round.phase === 'settled' ? 0 : 2, lastWriteAt: this.lastWriteAt || undefined, lastRecallAt: this.lastRecallAt };
+    this.s.railPending = this.pending;
+    this.s.onchainLinks = this.links;
+    this.s.llm = { calls: this.llmCalls, cap: 150, active: true };
     this.s.economics = {
       fundedAllocations: fundedAlloc.toFixed(3),
       capitalAtRisk: (funded.length * 3 * (CONFIG.maxDrawdownPct / 100)).toFixed(3),

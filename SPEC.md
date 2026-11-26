@@ -49,7 +49,7 @@ Each agent has its own key and its own module. A `Brain` interface decides order
 |---|---|---|
 | `shared/` | planner | types only |
 | `packages/data/` | data worker | CoinMarketCap, Atlas and Cournot adapters; live provider, recorder, replay provider |
-| `packages/rail/` | rail worker | `LocalRail`, `YellowRail` |
+| `packages/rail/` | rail worker | `LocalRail` (in-memory, for development), `VaultRail` (DeskVault contract on BNB Smart Chain testnet) |
 | `packages/engine/` | engine worker | risk manager, paper broker, agents, desk loop, HTTP and SSE server |
 | `contracts/` | contracts worker | `Scorecard.sol`, tests, deploy script, TS client |
 | `web/` | dashboard worker | the demo dashboard |
@@ -73,4 +73,4 @@ Each agent has its own key and its own module. A `Brain` interface decides order
 - Cournot: probabilities are never mocked or hardcoded. Each one traces to a saved raw response in `data/proofs/cournot/`. The UI shows the exact claim, the probability, the venue price and the sources as returned.
 - CoinMarketCap: at least one live Pro API call in the core loop; the key stays server-side.
 - Trades are paper trades and the UI says so. Capital, cut-off, payout and scorecard are real.
-- Yellow: credited once as the settlement rail ("Settlement runs on Yellow Network Protocol"). Never "trustless". Do not use the words Nitrolite or Clearnet in any user-facing text.
+- Capital: the desk's pot is held in the DeskVault contract on BNB Smart Chain testnet, in a test stablecoin. Allocations, cuts and the payout are contract state changes that need both the desk's transaction and the risk manager's signature. Say "on BNB Smart Chain testnet, with test tokens" wherever capital is called real. No third-party settlement network is used or credited.

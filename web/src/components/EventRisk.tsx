@@ -19,7 +19,13 @@ export function EventRiskPanel({ events, multiplier }: { events: EV[]; multiplie
       <div className="claims">
         {sorted.length === 0 && <p className="empty">No event claims reported yet.</p>}
         {sorted.map((e, i) => (
-          <article key={e.requestId ?? e.claim} className={`claim ${i === 0 ? 'lead' : ''}`}>
+          i > 0 ? (
+            <article key={e.requestId ?? e.claim} className="claim one" title={`${e.claim} (${e.live ? 'live call' : 'proof cache'}, ${dateTime(e.fetchedAt)})`}>
+              <span className="one-claim">&ldquo;{e.claim}&rdquo;</span>
+              <span className="one-stats mono">{p100(e.cournotProbability)} vs {p100(e.venuePrice)}, {e.divergence === undefined ? 'n/a' : `${e.divergence > 0 ? '+' : ''}${(e.divergence * 100).toFixed(0)} pts`}</span>
+            </article>
+          ) : (
+          <article key={e.requestId ?? e.claim} className="claim lead">
             <p className="claim-text">&ldquo;{e.claim}&rdquo;</p>
             <p className="small muted meta">{e.polarity === 'adverse' ? 'If true, bad for risk assets' : 'If true, good for risk assets'}{e.venue ? ` · venue: ${e.venue}` : ''}</p>
             {i > 0 && <p className="mini mono">Cournot {p100(e.cournotProbability)} · venue {p100(e.venuePrice)} · {e.divergence === undefined ? 'n/a' : `${e.divergence > 0 ? '+' : ''}${(e.divergence * 100).toFixed(0)} pts`}</p>}
@@ -35,12 +41,13 @@ export function EventRiskPanel({ events, multiplier }: { events: EV[]; multiplie
             {e.sources.length > 0 && (
               <ul className="sources">
                 {e.sources.map((s, k) => (
-                  <li key={k}>{s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : s.title}</li>
+                  <li key={k} title={s.snippet ? `${s.title}: ${s.snippet}` : s.title}>{s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : s.title}{s.snippet && <span className="muted src-snip"> {s.snippet}</span>}</li>
                 ))}
               </ul>
             )}
             {i === 0 && e.cournotExplanation && <p className="explain small muted">{e.cournotExplanation}</p>}
           </article>
+          )
         ))}
       </div>
       {ranking.length > 0 && (
@@ -50,7 +57,7 @@ export function EventRiskPanel({ events, multiplier }: { events: EV[]; multiplie
             <colgroup><col style={{ width: '42%' }} /><col style={{ width: '18%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '16%' }} /></colgroup>
             <thead><tr><th>Claim</th><th>Venue</th><th className="r">Cournot</th><th className="r">Venue px</th><th className="r">Gap</th></tr></thead>
             <tbody>
-              {ranking.map((e) => (
+              {ranking.slice(0, 3).map((e) => (
                 <tr key={e.marketId ?? e.claim}>
                   <td className="rk-claim" title={e.claim}><span className={`pol ${e.polarity}`}>{e.polarity === 'adverse' ? 'adverse' : 'favorable'}</span>{e.claim}</td>
                   <td className="muted">{(e.venue ?? '-').replace(/ prediction market$/i, '')}</td>

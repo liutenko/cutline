@@ -27,3 +27,11 @@ export const amount = (s: string): number => {
 
 export const money2 = (n: number): string => n.toFixed(2);
 export const money3 = (n: number): string => n.toFixed(3);
+
+import type { DeskState } from './types';
+
+/** One place for the asset label. The vault rail holds a test stablecoin, shown as tUSD. */
+export function assetLabel(desk: Pick<DeskState, 'rail' | 'config' | 'railState'>): string {
+  if (desk.rail === 'bnb-testnet-vault') return 'tUSD';
+  return (desk.railState?.asset ?? desk.config.asset).toUpperCase();
+}

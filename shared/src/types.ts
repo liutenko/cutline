@@ -169,6 +169,17 @@ export interface AgentAccount {
   /** Real capital currently allocated on the settlement rail (decimal string, e.g. "3.00"). "0" while evaluating or after a cut. */
   realAllocation: string;
   cutReason?: string;
+  /** What the desk remembered about this agent from earlier rounds (Living Brain). */
+  memory?: {
+    source: 'Living Brain';
+    /** Short recalled text, as returned by the brain. */
+    summary: string;
+    /** Pages the recall was based on. */
+    pages: { slug: string; version?: string | number; title?: string }[];
+    /** True when the record shows an earlier cut: the agent starts on probation terms. */
+    probation: boolean;
+    recalledAt: number;
+  };
   /** Why an agent past the evaluation window is not funded yet. */
   evalNote?: string;
   rogue?: boolean;
@@ -193,6 +204,8 @@ export interface DeskConfig {
   evalMinTrades?: number;
   /** Lowest paper P&L (percent of account, after costs) that still passes evaluation. */
   evalMinPnlPct?: number;
+  /** Risk budget factor for an agent on probation (earlier cut on record). */
+  probationBudgetFactor?: number;
   /** Pool fee charged on every paper fill, in percent. */
   poolFeePct?: number;
   evalTicks: number; // ticks an agent must survive, with pnl >= 0, to be funded
@@ -201,7 +214,8 @@ export interface DeskConfig {
 
 // ---------- Settlement rail ----------
 
-export type RailName = 'local' | 'yellow-sandbox' | 'yellow-mainnet';
+/** 'local' = in-memory ledger for development. 'bnb-testnet-vault' = the DeskVault contract on BNB Smart Chain testnet. */
+export type RailName = 'local' | 'bnb-testnet-vault';
 
 export interface RailParticipant {
   /** 'desk' | 'risk' | an AgentId */
@@ -213,7 +227,7 @@ export interface RailParticipant {
 export interface RailState {
   sessionId: string;
   version: number;
-  asset: 'usdt' | 'usdc';
+  asset: 'usdt' | 'usdc' | 'tusd';
   /** participant id -> decimal string. Sum is constant after open. */
   allocations: Record<string, string>;
   status: 'open' | 'closed';
@@ -224,7 +238,7 @@ export interface RailReceipt {
   rail: RailName;
   sessionId: string;
   version: number;
-  /** True for off-chain state updates (no gas). */
+  /** True when the step did not produce an on-chain transaction (local ledger only). */
   offchain: boolean;
   txHash?: Hex;
   explorerUrl?: string;
@@ -290,9 +304,13 @@ export interface DeskState {
     /** Real losses the desk absorbed from cut or losing agents. */
     lossesAbsorbed: string;
   };
+  /** Desk memory (Living Brain) status. Absent when memory is off. */
+  memoryStatus?: { enabled: boolean; brainName?: string; pendingCaptures: number; lastWriteAt?: number; lastRecallAt?: number; error?: string };
+  /** Rail operations queued or awaiting on-chain confirmation. */
+  railPending?: number;
   /** LLM layer counters. */
   llm?: { calls: number; cap: number; active: boolean };
-  /** On-chain transactions that are not rail steps: Yellow deposit and withdrawal, scorecard deployment. */
+  /** On-chain links that are not rail steps: contract deployments (Scorecard, DeskVault, test token). */
   onchainLinks?: { label: string; explorerUrl: string; txHash: string }[];
   /** Newest last, capped at 200. */
   events: DeskEvent[];
@@ -304,4 +322,6 @@ export type ControlAction =
   | { action: 'reset' }
   | { action: 'rogue'; agentId: AgentId }
   | { action: 'shock'; symbol: Sym; pct: number }
-  | { action: 'close-round' };
+  | { action: 'close-round' }
+  /** Re-run the desk memory recall for all agents (refused while a round is running). */
+  | { action: 'recall' };

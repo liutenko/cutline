@@ -5,22 +5,18 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "test": "tsx --test test/local.test.ts test/yellow.test.ts",
-    "test:live": "tsx --test test/*.live.test.ts",
-    "spike": "tsx scripts/spike.ts",
-    "probe:mainnet": "tsx scripts/probe-mainnet.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "tsx --test test/local.test.ts test/vault.chain.test.ts",
+    "test:live": "tsx scripts/live-flow.ts",
+    "typecheck": "tsc --noEmit",
+    "vault:close-stale": "tsx scripts/close-stale.ts"
   },
   "dependencies": {
-    "@yellow-org/sdk": "1.4.0",
     "decimal.js": "^10.6.0",
     "dotenv": "^18.0.10",
-    "viem": "^2.58.6",
-    "ws": "^8.23.0"
+    "viem": "^2.58.6"
   },
   "devDependencies": {
     "@types/node": "^22.20.7",
-    "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

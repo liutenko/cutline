@@ -8,9 +8,9 @@ Last updated: 2026-11-26. Built for the BNB Bangkok hackathon (Developer Track, 
 
 ## What it is
 
-Agents are evaluated on paper accounts at live prices, funded with real capital, checked by a risk manager on every order, and cut when they break a rule. Profit is paid out in one settlement, and each agent gets an on-chain track record that includes how often it was cut. Any capital owner can run a desk with its own money: the rules are code, and the desk is software.
+Agents are evaluated on paper accounts at live prices, funded with capital held in an on-chain vault (BNB Smart Chain testnet, test tokens), checked by a risk manager on every order, and cut when they break a rule. Profit is paid out in one on-chain settlement, and each agent gets an on-chain track record that includes how often it was cut. Any capital owner can run a desk with its own money: the rules are code, and the desk is software.
 
-**The trades are paper trades.** Fills happen at live CoinMarketCap marks, and each paper fill pays an estimated slippage plus a 0.25% pool fee. The data, the risk decisions, the capital, the cut-off, the payout and the scorecard are real, with the status notes in the next section. This is an independent hackathon project. Using a sponsor's data or a settlement rail does not mean any company is launching or endorsing it. Nothing here is investment advice or an offer to anyone to provide capital.
+**The trades are paper trades.** Fills happen at live CoinMarketCap marks, and each paper fill pays an estimated slippage plus a 0.25% pool fee. The data and the risk decisions are real. Capital, cut-off, payout and scorecard are on-chain on BNB Smart Chain testnet, with test tokens; mainnet and real funds are roadmap. This is an independent hackathon project. Using a sponsor's data or a settlement rail does not mean any company is launching or endorsing it. Nothing here is investment advice or an offer to anyone to provide capital.
 
 ## What is real and what is simulated
 
@@ -21,8 +21,8 @@ Agents are evaluated on paper accounts at live prices, funded with real capital,
 | Price check | Real. Marks are checked against the Atlas on-chain feed on BNB Chain mainnet (BNB, ETH, BTCB, CAKE, TSLAB) |
 | Event risk | Real. Two Cournot calls with raw responses saved in `data/proofs/cournot/` |
 | Risk decisions | Real. Six checks on every order, in `packages/engine/src/risk.ts` |
-| Cut-off | Real. Positions closed at mark and the allocation goes back to the desk when a limit is breached |
-| Capital and payout | Real code path. Default rail is a local ledger. The Yellow rail passes its tests, but the funded flow has not been run end to end yet: **pending** |
+| Cut-off logic | Real. Positions closed at mark and the allocation goes back to the desk when a limit is breached |
+| Capital, cut-off and payout | On-chain on BNB Smart Chain testnet, with test tokens (a test stablecoin with no value). Funding an agent, a cut and the payout are each a real testnet transaction. Mainnet and real funds are roadmap |
 | Scorecard | Real. Deployed on BSC testnet; one round from a live-data run is written on-chain (see "Deployed contracts") |
 | Atlas reads inside the Scorecard (testnet) | Real. The contract read the three Atlas testnet feeds on-chain at round close (`readOk` true in all three price stamps) |
 
@@ -41,14 +41,14 @@ Agents are evaluated on paper accounts at live prices, funded with real capital,
   event)                   |                                          v
                            |                                   paper accounts
                            +--> packages/rail: session, reallocate, close
-                           |      (local ledger, or Yellow Network Protocol)
+                           |      (local, or DeskVault on BSC testnet)
                            +--> contracts: Scorecard on BNB Chain (round close)
                            +--> HTTP + SSE :8787 --> web dashboard :5173
 ```
 
 1. **Apply.** Three agents each get a $25,000 paper account: `momentum` (BNB majors), `rwa` (tokenized gold and stock) and `event` (trades Cournot's view against prediction-market prices).
 2. **Evaluate.** An agent trades paper positions at live prices. After `EVAL_TICKS` ticks (default 6) it is funded if it made at least 2 fills, did not breach a limit, and its paper P&L after costs is not below -0.5% of the account (config defaults in `packages/engine/src/config.ts`).
-3. **Fund.** The desk allocates 3 USDT per agent out of a 10 USDT pot. The real allocation tracks the paper account in proportion.
+3. **Fund.** The desk allocates 3 units of a test stablecoin per agent out of a 10 unit pot held by the DeskVault contract on BNB Smart Chain testnet. Funding is a transaction signed by the desk and approved by the risk manager's EIP-712 signature. The allocation tracks the paper account in proportion.
 4. **Check every order.** The risk manager runs six checks. A rejected order never fills.
 
    | Check | Source | Rule |
@@ -60,8 +60,8 @@ Agents are evaluated on paper accounts at live prices, funded with real capital,
    | exposure | Desk | spot only: buys covered by cash, no shorts, no leverage |
    | concentration | Desk | one symbol is at most 40% of equity |
 
-5. **Cut.** An agent that loses 3% in a day or 6% from its peak is cut: positions are closed at mark and the real allocation goes back to the desk.
-6. **Pay out and record.** At round close each funded agent gets 80% of its real profit. The desk keeps the rest and all principal. Results are written to the Scorecard contract.
+5. **Cut.** An agent that loses 3% in a day or 6% from its peak is cut: positions are closed at mark and the allocation goes back to the desk in its own transaction.
+6. **Pay out and record.** At round close each funded agent gets 80% of its profit on the on-chain allocation. The desk keeps the rest and all principal. Results are written to the Scorecard contract.
 
 ## Sponsor technology
 
@@ -71,17 +71,18 @@ Agents are evaluated on paper accounts at live prices, funded with real capital,
 | CoinMarketCap | Pro API: prices, BNB Chain DEX liquidity and volume, fear and greed. The key stays server-side. Every call is logged | `packages/data/src/cmc.ts`, `packages/data/src/provider.ts` |
 | Atlas | On-chain SingleFeed price feeds, read every tick for BNB, ETH, BTCB, CAKE and TSLAB. A second set of Atlas feeds on BSC testnet (BNB, BTC, ETH) is stamped by the Scorecard at round close | `packages/data/src/atlas.ts`, `packages/engine/src/risk.ts`, `contracts/contracts/Scorecard.sol` |
 | Cournot | Official Cournot Intelligence Oracle Skill client, vendored at a pinned commit. Sets the event-risk multiplier and the event agent's regime | `packages/data/src/cournot.ts`, `packages/data/src/divergence.ts`, `packages/engine/src/risk.ts` |
-| Yellow Network Protocol | Settlement runs on Yellow Network Protocol: capital sits in a session, reallocations are off-chain, and nothing moves without both the desk's and the risk manager's signatures (public SDK `@yellow-org/sdk`) | `packages/rail/src/yellow.ts`, `packages/rail/src/index.ts` |
+| DeskVault (settlement) | The pot is held by the DeskVault contract on BNB Smart Chain testnet in a test stablecoin (6 decimals, no value). No allocation changes without the desk's transaction and the risk manager's EIP-712 signature, checked by the contract (versioned, replay-protected, allocations must sum to the pot). Agents sign nothing | `packages/rail/src/vault.ts`, `contracts/contracts/DeskVault.sol` |
 
 ## Quick start
 
-Requires Node 22 or newer (the vendored Cournot client needs 22.20 or newer). Each directory is its own npm project, so install in each one you use.
+Requires Node 22 or newer (the vendored Cournot client needs 22.20 or newer). Clone with `git clone --recurse-submodules <repo-url>`. The Cournot client is a submodule at `packages/data/vendor/cournot-skills`; in an existing clone run `git submodule update --init`. Each directory is its own npm project, so install in each one you use.
 
 ```bash
 cd packages/data   && npm install
 cd ../engine       && npm install
 cd ../rail         && npm install
-cd ../../contracts && npm install
+cd ../memory       && npm install
+cd ../../contracts && npm install && npm run compile
 cd ../web          && npm install
 ```
 
@@ -119,9 +120,13 @@ npm run dev          # http://localhost:5173, talks to the engine on :8787
 
 Set `VITE_ENGINE_URL` if the engine runs elsewhere. Open `http://localhost:5173/?mock=1` for a labelled mock feed with no engine. Press "Demo controls", then Start. The engine API is `GET /api/state`, `GET /api/events` (SSE) and `POST /api/control`. Set `AUTOSTART=1` to start the round at launch.
 
-**Yellow rail (optional).** `RAIL=yellow-sandbox` uses the Yellow sandbox node. `RAIL=yellow-mainnet` moves real funds on BNB Chain and refuses to open without an explicit confirmation variable; the manual funding steps are in `packages/rail/scripts/fund-mainnet.md`.
+**Vault rail (optional).** `RAIL=bnb-testnet-vault` settles on the DeskVault contract on BSC testnet (addresses default to `contracts/deployments/bscTestnet-vault.json`). Needs funded test wallets for the desk and the risk manager (test BNB for gas). Each on-chain step takes about 5 seconds; the engine queues them so trading never waits, and a cut always reaches the chain as its own transaction. `RAIL=local` is the in-memory rail for dev.
 
 **Scorecard deployment.** `cd contracts && npm run deploy:testnet`, then set `SCORECARD_ADDRESS` in `.env`.
+
+## Desk memory (optional)
+
+**Unverified against the live service.** After each round the desk writes what every agent did to Living Brain (ChatAndBuild's memory layer), and before the next round it reads each agent's record. An agent with an earlier cut on record starts on probation: risk budget x 0.5, and one more trade is needed to be funded. The module is `packages/memory/`. It is built and tested offline (27 tests) but has not been verified against the live Living Brain service. It is off unless `LIVINGBRAIN_API_KEY` is set.
 
 ## Configuration
 
@@ -130,11 +135,12 @@ Names and meaning only. Values live in `.env`, which is never committed.
 | Variable | Meaning |
 |---|---|
 | `DATA` | `live` (default), `replay` or `dev` |
-| `RAIL` | `local` (default), `yellow-sandbox` or `yellow-mainnet` |
+| `RAIL` | `local` (default, in-memory) or `bnb-testnet-vault` |
+| `VAULT_ADDRESS`, `TEST_USD_ADDRESS` | Optional overrides for the DeskVault and test stablecoin addresses; default to the deployment file |
 | `PORT` | Engine port, default 8787 |
 | `AUTOSTART` | `1` starts the round at launch |
 | `TICK_MS`, `EVAL_TICKS` | Tick length and ticks an agent must survive before funding |
-| `REAL_POT`, `REAL_ALLOCATION`, `ASSET` | Pot size, allocation per agent, `usdt` or `usdc` |
+| `REAL_POT`, `REAL_ALLOCATION`, `ASSET` | Pot size, allocation per agent, and the asset label shown in the dashboard |
 | `POOL_FEE_PCT`, `EVAL_MIN_TRADES`, `EVAL_MIN_PNL_PCT` | Paper pool fee and evaluation bar |
 | `REPLAY_FILE` | Recording to play in replay mode |
 | `RECORD` | `0` turns off snapshot recording in live mode |
@@ -144,11 +150,9 @@ Names and meaning only. Values live in `.env`, which is never committed.
 | `ATLAS_MAX_AGE_SEC` | Age after which an Atlas price counts as stale |
 | `PRICE_TOLERANCE_BPS` | Price tolerance for the recorder script |
 | `COURNOT_API_KEY`, `COURNOT_MAX_CALLS`, `COURNOT_CACHE_TTL_MS` | Cournot key for paid calls, live call budget per process (default 0, cache only), proof cache lifetime |
-| `ANTHROPIC_API_KEY`, `LLM` | Optional: lets Claude choose among rule candidates; `LLM=0` turns it off |
+| `ANTHROPIC_API_KEY`, `LLM`, `LLM_MAX_CALLS` | Optional: lets Claude choose among rule candidates; `LLM=0` turns it off; call cap per process |
+| `LIVINGBRAIN_API_KEY`, `LIVINGBRAIN_SUBJECT_ID` | Optional desk memory: service key and the subject the records are kept under. Memory is off without the key |
 | `DESK_KEY`, `RISK_KEY`, `AGENT_MOMENTUM_KEY`, `AGENT_RWA_KEY`, `AGENT_EVENT_KEY` | Test keys for the desk, the risk manager and the three agents |
-| `DESK_KEY_MAINNET` | Optional separate desk key for the mainnet rail (the same `_MAINNET` suffix works for the other keys) |
-| `YELLOW_WS_SANDBOX`, `YELLOW_WS_MAINNET` | Yellow node endpoints |
-| `YELLOW_MAINNET_CONFIRM` | Explicit confirmation needed before the mainnet rail commits real funds |
 | `BSC_TESTNET_RPC`, `BSC_MAINNET_RPC` | BNB Chain RPC endpoints |
 | `SCORECARD_ADDRESS`, `SCORECARD_NETWORK` | Deployed Scorecard and its network (`bscTestnet` default, or `bsc`) |
 | `SCORECARD_FEEDS` | JSON map of symbol to the Atlas feed the Scorecard stamps at close |
@@ -161,12 +165,13 @@ Run on 2026-11-26. All pass.
 
 | Package | Command | Result |
 |---|---|---|
-| Engine | `cd packages/engine && npm test` | 31 passing |
+| Engine | `cd packages/engine && npm test` | 47 passing |
 | Data | `cd packages/data && npm run test:offline` | 14 passing |
-| Rail | `cd packages/rail && npm test` | 17 passing |
-| Contracts | `cd contracts && npx hardhat test` | 7 passing |
+| Rail | `cd packages/rail && npm test` (run `npm run compile` in `contracts` first) | 19 passing |
+| Contracts | `cd contracts && npx hardhat test` | 17 passing |
+| Memory | `cd packages/memory && npm run test:offline` | 27 passing |
 
-Live tests (`npm run test:live` in `packages/data` and `packages/rail`) call external services and are not part of the counts above.
+Live tests (`npm run test:live` in `packages/data`, `packages/rail` and `packages/memory`) call external services and are not part of the counts above.
 
 ## Cournot Integration
 
@@ -206,21 +211,38 @@ Billing footer of the assessment, as returned: `billing: "free_quota"`, `charged
 
 ## Deployed contracts
 
-Operator (desk test wallet): `0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E`. Explorer: https://testnet.bscscan.com.
+Scorecard operator (desk test wallet): `0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E`. Explorer: https://testnet.bscscan.com.
 
 | Item | Network | Address or transaction | Link |
 |---|---|---|---|
 | Scorecard contract | BSC testnet (97) | `0x6fb61263bbc19b10eb1a60ade0ea825769e26b42` | [https://testnet.bscscan.com/address/0x6fb61263bbc19b10eb1a60ade0ea825769e26b42](https://testnet.bscscan.com/address/0x6fb61263bbc19b10eb1a60ade0ea825769e26b42) |
 | Deploy transaction | BSC testnet (97) | `0x4036ff8f874fc929bf37b8fec43ee8b83463dd3a7f1a4c9e5a264fc108f00036` | [https://testnet.bscscan.com/tx/0x4036ff8f874fc929bf37b8fec43ee8b83463dd3a7f1a4c9e5a264fc108f00036](https://testnet.bscscan.com/tx/0x4036ff8f874fc929bf37b8fec43ee8b83463dd3a7f1a4c9e5a264fc108f00036) |
-| `closeRound` transaction (round from a live-data run: success, 348,760 gas, 7 logs: 3 AgentResult, 3 PriceStamp, 1 RoundClosed) | BSC testnet (97) | `0x767a318e8499d455df798daeae2cbe0a92985c8244c06f33931efcc1f1ab7fb4` | [https://testnet.bscscan.com/tx/0x767a318e8499d455df798daeae2cbe0a92985c8244c06f33931efcc1f1ab7fb4](https://testnet.bscscan.com/tx/0x767a318e8499d455df798daeae2cbe0a92985c8244c06f33931efcc1f1ab7fb4) |
-| Yellow deposit and payout transactions (if the mainnet rail is run) | BNB Chain mainnet (56) | PENDING | PENDING |
+| DeskVault contract | BSC testnet (97) | `0x3c7ff14381299ffeb2d0c3b187f931bddc9fcbe2` | [0x3c7ff14381299ffeb2d0c3b187f931bddc9fcbe2](https://testnet.bscscan.com/address/0x3c7ff14381299ffeb2d0c3b187f931bddc9fcbe2) |
+| Test stablecoin (6 decimals, no value) | BSC testnet (97) | `0x61377805405038a67d7e44a66c1d8530593ade0f` | [0x61377805405038a67d7e44a66c1d8530593ade0f](https://testnet.bscscan.com/address/0x61377805405038a67d7e44a66c1d8530593ade0f) |
+| Desk wallet (test) | BSC testnet (97) | `0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E` | |
+| Risk manager wallet (test) | BSC testnet (97) | `0x8565ECE93D4131ADfBEFacA8Bb5Ebe85296D0FEd` | |
+| `closeRound` transaction (an earlier round from a live-data run: success, 348,760 gas, 7 logs: 3 AgentResult, 3 PriceStamp, 1 RoundClosed) | BSC testnet (97) | `0x767a318e8499d455df798daeae2cbe0a92985c8244c06f33931efcc1f1ab7fb4` | [https://testnet.bscscan.com/tx/0x767a318e8499d455df798daeae2cbe0a92985c8244c06f33931efcc1f1ab7fb4](https://testnet.bscscan.com/tx/0x767a318e8499d455df798daeae2cbe0a92985c8244c06f33931efcc1f1ab7fb4) |
+
+
+### One full round on-chain
+
+A full round driven by the engine on live market data, on BNB Smart Chain testnet with test tokens. Each step is a real transaction.
+
+| Step | Transaction |
+|---|---|
+| Open: deposit 10 test units into the vault | [`0x1f9461db8f9d937fbd12be1e3371e1c71a47519f7cdb2113e4f71e39c1d467b9`](https://testnet.bscscan.com/tx/0x1f9461db8f9d937fbd12be1e3371e1c71a47519f7cdb2113e4f71e39c1d467b9) |
+| Fund two agents with 3 each | [`0x9ac5c339bd46ba50b294aa441ba8575b786c8066d5dcd9649cc0496c13cc4dd9`](https://testnet.bscscan.com/tx/0x9ac5c339bd46ba50b294aa441ba8575b786c8066d5dcd9649cc0496c13cc4dd9) |
+| Cut one agent: 2.817029 goes back to the desk | [`0x46c099efbcd47a0ef57d2e244309a074afd569d64c43d5433c5ff76417991813`](https://testnet.bscscan.com/tx/0x46c099efbcd47a0ef57d2e244309a074afd569d64c43d5433c5ff76417991813) |
+| Close with the final split | [`0xe6847d27c6f2c0c9787470803c70b452bfe48aa8bb53d6b73734bd46a2a7d45b`](https://testnet.bscscan.com/tx/0xe6847d27c6f2c0c9787470803c70b452bfe48aa8bb53d6b73734bd46a2a7d45b) |
+| Scorecard for that round | [`0x338777a64b590e8469b15890ea286d7a15dbf0d20f77c00ad10e129500c7aea8`](https://testnet.bscscan.com/tx/0x338777a64b590e8469b15890ea286d7a15dbf0d20f77c00ad10e129500c7aea8) |
 
 ## Roadmap
 
-1. **Hackathon build.** Three agents, six checks, paper fills with costs, one settlement, Scorecard contract.
+1. **Hackathon build.** Three agents, six checks, paper fills with costs, on-chain vault settlement on testnet, Scorecard contract.
 2. **Next 90 days.** Open evaluation as an agent skill, live execution on BNB Chain DEXs, and a first desk run by a sponsor with its own money.
 3. **Agent sources (roadmap, not built).** Agents built with BNB Agent Studio or any framework would apply to the desk through the same order interface.
-4. **Later.** More desks sharing one scorecard standard, and a licensed structure before any outside capital.
+4. **State channels (roadmap, not built).** Move allocation updates off-chain over state channels, so capital moves between agents instantly and without gas, with the vault as the on-chain anchor.
+5. **Later.** More desks sharing one scorecard standard, and a licensed structure before any outside capital.
 
 ## How this becomes a business
 
@@ -230,12 +252,14 @@ Operator (desk test wallet): `0x8853e3739f9Aa1d787fdBc3876Ffe13D49CDbA1E`. Explo
 4. The fee is a screening price, not the profit engine. It is set so that a coin-flipping agent loses money.
 5. The split slides. 80 percent to the agent applies to the small entry tier. As allocations grow, more of the profit goes to the capital owner.
 
-Where this sits: Kraken Prop has no API and its orders are placed by hand. Propr accepts agents, on Hyperliquid perps. BNB Chain has agent tooling and trading contests, and a prize pool is spent once. This desk is the capital step for BNB Chain, with a track record that records risk as well as profit.
+Where this sits: exchange-run prop programs exist for human traders, and they are built for manual trading. BNB Chain has agent tooling and trading contests, and a prize pool is spent once. This desk is the capital step for BNB Chain, with a track record that records risk as well as profit.
 
 ## Limitations and honesty notes
 
 - Fills are paper. The desk is the counterparty to paper profit and pays winners from its own pot. Live execution on DEXs is not built.
-- The default settlement rail is a local ledger. The Yellow rail is implemented and tested, and the quorum rule (desk and risk manager must both sign) was checked against the Yellow sandbox node. The funded flow has not been run end to end: **pending**.
+- Capital moves on BNB Smart Chain testnet with test tokens only. Mainnet and real funds are roadmap.
+- One process holds the desk and risk manager keys in this demo. In production the risk manager would sign in its own process.
+- The vault has no timeout or escape hatch if the risk manager's key is lost.
 - Atlas and CoinMarketCap are not independent. Atlas draws on CoinMarketCap pricing, so the check catches stale or broken feeds and mark errors, not a shared upstream error.
 - The Scorecard is on testnet only. The round written so far came from a run on live data with paper trades.
 - The evaluation bar is low so a round fits in a demo (6 ticks, 2 fills, P&L not below -0.5%). A production bar would add a profit target, a minimum number of trades and a minimum number of days.

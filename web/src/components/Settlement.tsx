@@ -1,26 +1,28 @@
 import type { DeskState } from '../types';
-import { amount, clock, money3, shortHash, usd } from '../format';
+import { amount, assetLabel, clock, money3, shortHash, usd } from '../format';
 
 const TONE_BY_ID: Record<string, string> = { desk: 't0', risk: 't4', momentum: 't1', rwa: 't2', event: 't3' };
 const tone = (id: string): string => TONE_BY_ID[id] ?? 't4';
 
 export function SettlementPanel({ desk }: { desk: DeskState }) {
+  const vault = desk.rail === 'bnb-testnet-vault';
   const alloc = desk.railState?.allocations ?? null;
   const order = ['desk', 'risk', 'momentum', 'rwa', 'event'];
   const entries = alloc ? Object.entries(alloc).map(([id, v]) => ({ id, v: amount(v) })).filter((e) => e.v > 0 || e.id === 'desk').sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)) : [];
   const total = entries.reduce((t, e) => t + e.v, 0) || 1;
   const names = new Map<string, string>([['desk', 'Desk reserve'], ['risk', 'Risk manager']]);
   for (const a of desk.agents) names.set(a.agentId, a.name);
-  const offchain = desk.receipts.filter((r) => r.offchain).length;
-  const onchain = desk.receipts.filter((r) => !r.offchain);
-  const recent = [...desk.receipts].reverse().slice(0, 1);
-  const asset = desk.config.asset.toUpperCase();
+  const txs = desk.receipts.filter((r) => r.txHash);
+  const recent = [...txs].reverse().slice(0, 1);
+  const pending = desk.railPending ?? 0;
+  const asset = assetLabel(desk);
+  const links = desk.onchainLinks ?? [];
 
   return (
     <section className="panel settle" aria-label="Settlement">
       <div className="panel-head">
-        <h2>Settlement</h2>
-        <span className="muted small mono">{desk.railState ? `session v${desk.railState.version}, ${desk.railState.status}` : 'no session'}</span>
+        <h2>{vault ? 'Settlement, on-chain' : 'Settlement'}</h2>
+        <span className="muted small mono">{desk.railState ? `v${desk.railState.version}, ${desk.railState.status}` : 'no session'}</span>
       </div>
       {entries.length > 0 ? (
         <>
@@ -35,42 +37,33 @@ export function SettlementPanel({ desk }: { desk: DeskState }) {
           </ul>
         </>
       ) : <p className="empty">The pot has not been deposited yet.</p>}
-      <p className="small receipts-head"><strong className="mono">{offchain}</strong> off-chain updates, no gas. <strong className="mono">{onchain.length}</strong> on-chain.</p>
-      {(desk.onchainLinks ?? []).length > 0 && (
-        <ul className="receipts onchain-links">
-          {(desk.onchainLinks ?? []).map((l) => (
-            <li key={l.txHash} className="scorecard">
-              <span className="mono muted">BNB</span>
-              <span>{l.label}</span>
-              <span className="mono small"><a href={l.explorerUrl} target="_blank" rel="noreferrer">tx {shortHash(l.txHash)}</a></span>
-            </li>
-          ))}
-        </ul>
+      {vault ? (
+        <p className="small receipts-head"><strong className="mono">{txs.length}</strong> transactions on BNB Smart Chain testnet{pending > 0 ? <span className="pending"> · {pending} transaction{pending > 1 ? 's' : ''} confirming</span> : null}</p>
+      ) : (
+        <p className="small receipts-head muted">Local ledger. No on-chain settlement in this mode.</p>
+      )}
+      {links.length > 0 && (
+        <p className="small onchain-links">
+          {links.map((l) => <a key={l.txHash} href={l.explorerUrl} target="_blank" rel="noreferrer" title={l.txHash}>{l.label}</a>)}
+        </p>
       )}
       <ul className="receipts">
         {recent.map((r) => (
           <li key={`${r.version}-${r.kind}`}>
             <span className="mono muted">{clock(r.ts)}</span>
-            <span>{r.kind} v{r.version}{r.memo ? `, ${r.memo.toLowerCase()}` : ''}</span>
-            <span className="mono small">
-              {r.offchain ? 'off-chain' : r.txHash ? (r.explorerUrl ? <a href={r.explorerUrl} target="_blank" rel="noreferrer">tx {shortHash(r.txHash)}</a> : `tx ${shortHash(r.txHash)}`) : 'on-chain'}
-            </span>
+            <span>{r.kind}{r.memo ? `, ${r.memo.toLowerCase()}` : ''}</span>
+            <span className="mono small">{r.explorerUrl ? <a href={r.explorerUrl} target="_blank" rel="noreferrer">{shortHash(r.txHash ?? '')}</a> : shortHash(r.txHash ?? '')}</span>
           </li>
         ))}
         {desk.scorecards.map((s) => (
           <li key={s.txHash} className="scorecard">
             <span className="mono muted">BNB</span>
             <span>Scorecard, round {s.roundId}</span>
-            <span className="mono small"><a href={s.explorerUrl} target="_blank" rel="noreferrer">tx {shortHash(s.txHash)}</a></span>
+            <span className="mono small"><a href={s.explorerUrl} target="_blank" rel="noreferrer">{shortHash(s.txHash)}</a></span>
           </li>
         ))}
       </ul>
-      <p className="credit">{creditLine(desk.rail)}</p>
+      {vault && <p className="muted small vault-note">The pot is held by the DeskVault contract in a test stablecoin. No allocation changes without the desk&apos;s transaction and the risk manager&apos;s signature.</p>}
     </section>
   );
-}
-
-function creditLine(rail: DeskState['rail']): string {
-  if (rail === 'local') return 'Local ledger. Settlement rail not connected.';
-  return rail === 'yellow-sandbox' ? 'Settlement runs on Yellow Network Protocol (sandbox)' : 'Settlement runs on Yellow Network Protocol';
 }
