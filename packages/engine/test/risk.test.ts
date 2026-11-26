@@ -81,12 +81,13 @@ test('eventMultiplier follows the spec formula', () => {
   assert.equal(eventMultiplier([], config).multiplier, 1);
   // adverse p=0.3 -> 0.7
   assert.equal(eventMultiplier([ev({ cournotProbability: 0.3 })], config).multiplier, 0.7);
-  // favorable p=0.2 -> adverse 0.8 -> 0.2 clamped to 0.25
-  assert.equal(eventMultiplier([ev({ polarity: 'favorable', cournotProbability: 0.2 })], config).multiplier, 0.25);
-  // highest adverse prob wins: adverse 0.4 and favorable 0.9 (adverse 0.1) -> 0.6
-  const r = eventMultiplier([ev({ cournotProbability: 0.4, claim: 'Rates up' }), ev({ polarity: 'favorable', cournotProbability: 0.9 })], config);
+  // favorable claims never reduce the budget, however unlikely they are
+  assert.equal(eventMultiplier([ev({ polarity: 'favorable', cournotProbability: 0.2 })], config).multiplier, 1);
+  assert.match(eventMultiplier([ev({ polarity: 'favorable', cournotProbability: 0.027 })], config).reason, /No adverse Cournot claim/);
+  // highest adverse prob wins; favorable rows are ignored either way
+  const r = eventMultiplier([ev({ cournotProbability: 0.4, claim: 'Rates up' }), ev({ polarity: 'favorable', cournotProbability: 0.01 })], config);
   assert.equal(r.multiplier, 0.6);
-  assert.match(r.reason, /"Rates up" at 40\.0%/);
+  assert.match(r.reason, /adverse claim "Rates up" at 40\.0%/);
   // divergence penalty: 0.7 * 0.8 = 0.56
   const d = eventMultiplier([ev({ cournotProbability: 0.3, divergence: -0.12 })], config);
   assert.equal(d.multiplier, 0.56);
@@ -106,4 +107,18 @@ test('checkBreach: daily loss and max drawdown', () => {
   const dd = checkBreach(account({ peakEquityUsd: 27000, equityUsd: 25300, drawdownPct: 6.3, dailyLossPct: 0 }), config);
   assert.equal(dd?.kind, 'max-drawdown');
   assert.match(dd!.reason, /6\.30% from the \$27,000 peak/);
+});
+
+test('eventMultiplier with the three live Cournot assessments of 26 Nov is 0.51, set by the $55,000 claim', () => {
+  const live = [
+    ev({ claim: 'Bitcoin below $55,000', polarity: 'adverse', cournotProbability: 0.487, divergence: 0 }),
+    ev({ claim: 'Bitcoin below $50,000', polarity: 'adverse', cournotProbability: 0.279, divergence: 0 }),
+    ev({ claim: 'Ethereum above $3,000', polarity: 'favorable', cournotProbability: 0.027, divergence: 0 }),
+  ];
+  const r = eventMultiplier(live, config);
+  assert.equal(r.multiplier, 0.51);
+  assert.equal(r.driver?.claim, 'Bitcoin below $55,000');
+  assert.equal(r.adverseProb, 0.487);
+  assert.match(r.reason, /adverse claim "Bitcoin below \$55,000" at 48\.7%, so every risk budget is scaled to 51%/);
+  assert.doesNotMatch(r.reason, /97/);
 });

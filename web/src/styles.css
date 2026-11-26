@@ -375,3 +375,18 @@ a { color: var(--accent); text-underline-offset: 2px; }
 .claim.lead .meta { display: none; }
 .vault-note { margin-top: 2px; }
 .settle .receipts li { padding: 1px 0; }
+
+.shell { min-height: 600px; }
+.formula { margin: 0 0 3px; font-size: 11px; }
+.onchain-links { gap: 0 10px; }
+.onchain-links span { white-space: nowrap; }
+
+.ranking { overflow: hidden; }
+.ranking table { width: 100%; max-width: 100%; }
+@media (max-width: 1340px) { .bps { display: none; } }
+
+.claim.one { padding: 1px 0; }
+.vault-note { font-size: 10.5px; }
+.memory .small { font-size: 11px; }
+.formula { display: inline-block; margin-top: 1px; }
+.formula { font-family: var(--sans); font-size: 11px; white-space: nowrap; }

@@ -12,7 +12,7 @@ export function MemoryPanel({ desk }: { desk: DeskState }) {
       </div>
       <p className="small">
         <span className="mono">{m.pendingCaptures > 0 ? `${m.pendingCaptures} captures compiling` : 'up to date'}</span>
-        <span className="muted mono"> · last write {m.lastWriteAt ? clock(m.lastWriteAt) : 'none'} · last recall {m.lastRecallAt ? clock(m.lastRecallAt) : 'none'}</span>
+        <span className="muted mono"> · written {m.lastWriteAt ? clock(m.lastWriteAt).slice(0, 5) : 'never'} · recalled {m.lastRecallAt ? clock(m.lastRecallAt).slice(0, 5) : 'never'}</span>
       </p>
       {m.error && <p className="small mem-err">{m.error}</p>}
       <p className="muted small mem-cap">After each round the desk writes what every agent did. Before the next round it reads each agent&apos;s record.</p>

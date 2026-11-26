@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBrain, MomentumBrain, RwaBrain, eventRegime } from '../src/agents/RuleBrain.ts';
 import Anthropic from '@anthropic-ai/sdk';
-import { LlmBrain, LlmGate, type LlmClient } from '../src/agents/LlmBrain.ts';
+import { clip, LlmBrain, LlmGate, RATIONALE_MAX, type LlmClient } from '../src/agents/LlmBrain.ts';
+import { maxAdverseProb } from '../src/agents/common.ts';
 import type { BrainContext } from '../src/agents/types.ts';
 import { evaluateOrder } from '../src/risk.ts';
 import { account, config, ev, instruments, mirrored, REAL_EVENTS, snap } from './fixtures.ts';
@@ -235,4 +236,44 @@ test('rwa prefers gold over tokenized stock in risk-off', async () => {
   const [o] = await new RwaBrain().propose(ctx({ snapshot: s, instruments: instsGold }));
   assert.equal(o.symbol, 'PAXG');
   assert.match(o.rationale, /Fear and greed is 10/);
+});
+
+test('top adverse probability ignores favorable claims: rwa text and the LLM prompt use the adverse claim', async () => {
+  const live = [
+    ev({ claim: 'Bitcoin below $55,000', polarity: 'adverse', cournotProbability: 0.487, divergence: 0 }),
+    ev({ claim: 'Ethereum above $3,000', polarity: 'favorable', cournotProbability: 0.027, divergence: 0 }),
+  ];
+  const c = twoChoices({ eventMultiplier: 0.51 });
+  c.snapshot.eventRisk = live;
+  assert.deepEqual(maxAdverseProb(c), { p: 0.487, claim: 'Bitcoin below $55,000' });
+  const onlyFav = twoChoices();
+  onlyFav.snapshot.eventRisk = [live[1]];
+  assert.equal(maxAdverseProb(onlyFav).p, 0);
+
+  // rwa: fear 30 is risk-off; the rationale names the adverse claim, never 97%.
+  const s = snap({ eventRisk: live, fearGreed: 30 });
+  const [o] = await new RwaBrain().propose(ctx({ snapshot: s }));
+  assert.match(o.rationale, /the top adverse event, "Bitcoin below \$55,000", is at 49%/);
+  assert.doesNotMatch(o.rationale, /97%/);
+
+  // LLM prompt carries the corrected reading and the 220-character cap.
+  let prompt = '';
+  const client: LlmClient = { messages: { create: (async (body: { messages: { content: string }[] }) => {
+    prompt = body.messages[0].content;
+    return answer('{"choice":1,"rationale":"BNB leads at 0.5% in 1h."}')();
+  }) as never } };
+  await new LlmBrain(new MomentumBrain(), { client }).propose(c);
+  assert.match(prompt, /Event risk: top adverse Cournot claim "Bitcoin below \$55,000" at 48\.7%; risk budget multiplier 0\.51\./);
+  assert.match(prompt, /at most 220 characters/);
+});
+
+test('LLM rationale is clipped to 220 characters at a word boundary', async () => {
+  assert.equal(RATIONALE_MAX, 220);
+  const long = 'BNB is up 0.5% in 1h and 2.1% in 24h, ' + 'which keeps the trend intact while the budget allows more room '.repeat(5);
+  const short = clip(long);
+  assert.ok(short.length <= 220 && short.endsWith('...'), short);
+  assert.equal(clip('BNB is up 0.5%.'), 'BNB is up 0.5%.');
+  const b = new LlmBrain(new MomentumBrain(), { client: fakeClient(answer(JSON.stringify({ choice: 1, rationale: long }))) });
+  const [o] = await b.propose(twoChoices());
+  assert.ok(o.rationale.length <= 220);
 });

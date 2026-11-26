@@ -47,9 +47,10 @@ export interface EventMultiplierResult {
 }
 
 /**
- * multiplier = clamp(1 - maxAdverseProb, min, 1); times 0.8 if any |divergence| >= 0.10.
- * The result is clamped to [minEventMultiplier, 1] again after the penalty so it never leaves
- * the documented range, and rounded to 2 decimals so tiny probability moves do not spam events.
+ * multiplier = clamp(1 - highest adverse probability, min, 1), using only full Cournot assessments with
+ * polarity 'adverse'. Favorable claims never reduce the budget; with no adverse assessment it is 1.
+ * Times 0.8 if any assessment's |divergence| >= 0.10. Clamped to [minEventMultiplier, 1] again after the
+ * penalty, and rounded to 2 decimals so tiny probability moves do not spam events.
  */
 export function eventMultiplier(events: EventRisk[], config: Pick<DeskConfig, 'minEventMultiplier'>): EventMultiplierResult {
   // Only full Cournot assessments (with evidence) move the multiplier; ranking rows are trading signals only.
@@ -57,32 +58,38 @@ export function eventMultiplier(events: EventRisk[], config: Pick<DeskConfig, 'm
   if (!events.length) {
     return { multiplier: 1, reason: 'No Cournot assessments are loaded, so risk budgets are at 100%.', adverseProb: 0, divergencePenalty: false };
   }
-  let driver: EventRisk | undefined;
-  let maxAdverse = -1;
-  for (const e of events) {
-    const p = e.cournotProbability;
-    const adverse = e.polarity === 'adverse' ? p : 1 - p;
-    if (adverse > maxAdverse) {
-      maxAdverse = adverse;
-      driver = e;
-    }
-  }
+  const { p: maxAdverse, driver } = topAdverse(events);
   const divergent = events.find((e) => typeof e.divergence === 'number' && Math.abs(e.divergence) >= 0.1);
   let m = clamp(1 - maxAdverse, config.minEventMultiplier, 1);
   if (divergent) m = m * 0.8;
   m = clamp(m, config.minEventMultiplier, 1);
   m = Math.round(m * 100) / 100;
 
-  const d = driver!;
-  const pPct = (d.cournotProbability * 100).toFixed(1);
-  let reason =
-    `Cournot puts "${d.claim}" at ${pPct}% (${d.polarity}), so the adverse probability is ${(maxAdverse * 100).toFixed(1)}% ` +
-    `and every risk budget is scaled to ${(m * 100).toFixed(0)}%`;
+  let reason = driver
+    ? `Cournot puts the adverse claim "${driver.claim}" at ${(maxAdverse * 100).toFixed(1)}%, so every risk budget is scaled to ${(m * 100).toFixed(0)}%`
+    : `No adverse Cournot claim is loaded (favorable claims do not reduce budgets), so risk budgets are at ${(m * 100).toFixed(0)}%`;
   if (divergent) {
     reason += `, including a 0.8 penalty because Cournot and the venue differ by ${(Math.abs(divergent.divergence!) * 100).toFixed(0)} points on "${divergent.claim}"`;
   }
   reason += '.';
   return { multiplier: m, reason, driver, adverseProb: maxAdverse, divergencePenalty: !!divergent };
+}
+
+/**
+ * The highest Cournot probability among full assessments with polarity 'adverse' (ranking rows and
+ * favorable claims excluded). The single definition of "top adverse event probability".
+ */
+export function topAdverse(events: EventRisk[]): { p: number; driver?: EventRisk } {
+  let p = 0;
+  let driver: EventRisk | undefined;
+  for (const e of events) {
+    if (e.origin === 'ranking' || e.polarity !== 'adverse') continue;
+    if (!driver || e.cournotProbability > p) {
+      p = e.cournotProbability;
+      driver = e;
+    }
+  }
+  return { p, driver };
 }
 
 export interface RiskContext {

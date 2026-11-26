@@ -5,10 +5,30 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AgentId, Order } from '../../../../shared/src/types.ts';
 import { grossExposure, usd } from '../risk.ts';
 import type { Brain, BrainContext, Candidate, CandidateSource } from './types.ts';
+import { maxAdverseProb } from './common.ts';
 
 export const LLM_MODEL = 'claude-haiku-5-5';
 const TIMEOUT_MS = 3000;
 const MAX_TOKENS = 150;
+/** The dashboard row is small: the prompt asks for at most this many characters, and longer text is clipped. */
+export const RATIONALE_MAX = 220;
+
+/** Clips at a word boundary to RATIONALE_MAX characters. */
+export function clip(text: string): string {
+  if (text.length <= RATIONALE_MAX) return text;
+  const cut = text.slice(0, RATIONALE_MAX - 3);
+  const sp = cut.lastIndexOf(' ');
+  return `${(sp > 120 ? cut.slice(0, sp) : cut).replace(/[\s,;:.]+$/, '')}...`;
+}
+
+/** The corrected event reading given to the model: adverse assessments only, plus the desk multiplier. */
+function eventLine(ctx: BrainContext): string {
+  const adv = maxAdverseProb(ctx);
+  const top = adv.claim
+    ? `top adverse Cournot claim "${adv.claim}" at ${(adv.p * 100).toFixed(1)}%`
+    : 'no adverse Cournot claim loaded (favorable claims are not risk events)';
+  return `${top}; risk budget multiplier ${ctx.eventMultiplier.toFixed(2)}.`;
+}
 
 const SCHEMA = {
   type: 'object',
@@ -107,8 +127,8 @@ export class LlmBrain implements Brain {
       this.rules.commit(ctx, chosen);
       if (!chosen) return [];
       const text = pick.rationale.trim().replace(/\s+/g, ' ').replace(/[–—]/g, '-');
-      const ok = text.length > 10 && text.length < 400 && /\d/.test(text);
-      return chosen.orders.map((o) => ({ ...o, rationale: ok ? text : o.rationale, brain: 'llm' as const }));
+      const ok = text.length > 10 && /\d/.test(text);
+      return chosen.orders.map((o) => ({ ...o, rationale: ok ? clip(text) : o.rationale, brain: 'llm' as const }));
     } catch (e) {
       if (isPermanent(e)) this.gate.disable(e instanceof Error ? e.message.slice(0, 160) : String(e));
       const now = Date.now();
@@ -126,9 +146,10 @@ export class LlmBrain implements Brain {
     const prompt = [
       `You are the ${this.agentId} agent on a paper prop desk. Pick one option.`,
       `Equity ${usd(a.equityUsd)}, cash ${usd(a.cashUsd)}, exposure ${usd(grossExposure(a, ctx.snapshot))}, budget ${usd(a.riskBudgetUsd)}, drawdown ${a.drawdownPct.toFixed(2)}% of ${ctx.config.maxDrawdownPct}%. Positions: ${a.positions.map((p) => `${p.symbol} ${usd(p.qty * (ctx.snapshot.marks[p.symbol]?.cmcPrice ?? p.avgPrice))}`).join(', ') || 'none'}.`,
+      `Event risk: ${eventLine(ctx)}`,
       `0. Do nothing.`,
       ...lines,
-      `Reply as JSON {"choice": number, "rationale": one plain sentence citing the numbers, no dashes}.`,
+      `Reply as JSON {"choice": number, "rationale": one plain sentence of at most ${RATIONALE_MAX} characters citing the numbers, no dashes}.`,
     ].join('\n');
     let handle: NodeJS.Timeout | undefined;
     const timer = new Promise<never>((_, rej) => {

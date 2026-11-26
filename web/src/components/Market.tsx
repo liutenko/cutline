@@ -30,7 +30,7 @@ export function MarketStrip({ snapshot }: { snapshot: MarketSnapshot | null }) {
                 ? <><span className="muted">Atlas</span> {price(m.atlasPrice)}</>
                 : <span className="muted">No Atlas price</span>}
             </div>
-            <div className="ms-agree"><span className={`agree ${a.cls}`} title={a.text}>{a.text}{m.deviationBps !== undefined && m.atlasPrice !== undefined && !m.atlasStale ? `, ${m.deviationBps.toFixed(0)} bps` : ''}</span>{m.synthetic && <span className="sim-tag">Simulated shock</span>}</div>
+            <div className="ms-agree">{!m.synthetic && <span className={`agree ${a.cls}`} title={a.text}>{a.text}{m.deviationBps !== undefined && m.atlasPrice !== undefined && !m.atlasStale ? <span className="bps">{`, ${m.deviationBps.toFixed(0)} bps`}</span> : null}</span>}{m.synthetic && <span className="sim-tag">Simulated shock</span>}</div>
           </div>
         );
       })}

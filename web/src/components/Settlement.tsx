@@ -1,5 +1,5 @@
 import type { DeskState } from '../types';
-import { amount, assetLabel, clock, money3, shortHash, usd } from '../format';
+import { amount, assetLabel, clock, money3, shortHash } from '../format';
 
 const TONE_BY_ID: Record<string, string> = { desk: 't0', risk: 't4', momentum: 't1', rwa: 't2', event: 't3' };
 const tone = (id: string): string => TONE_BY_ID[id] ?? 't4';
@@ -13,7 +13,7 @@ export function SettlementPanel({ desk }: { desk: DeskState }) {
   const names = new Map<string, string>([['desk', 'Desk reserve'], ['risk', 'Risk manager']]);
   for (const a of desk.agents) names.set(a.agentId, a.name);
   const txs = desk.receipts.filter((r) => r.txHash);
-  const recent = [...txs].reverse().slice(0, 1);
+  const recent = [...txs].reverse().slice(0, 3);
   const pending = desk.railPending ?? 0;
   const asset = assetLabel(desk);
   const links = desk.onchainLinks ?? [];
@@ -29,7 +29,6 @@ export function SettlementPanel({ desk }: { desk: DeskState }) {
           <div className="alloc-bar" role="img" aria-label="Allocation by participant">
             {entries.map((e) => <div key={e.id} className={`seg ${tone(e.id)}`} style={{ width: `${(e.v / total) * 100}%` }} title={`${names.get(e.id) ?? e.id}: ${money3(e.v)} ${asset}`} />)}
           </div>
-          <p className="muted small demo-note">Demo pot: {amount(desk.config.realPot)} {asset}. Each {amount(desk.config.realAllocationPerAgent)} {asset} allocation mirrors a {usd(desk.config.paperAccountUsd)} paper account.</p>
           <ul className="alloc-list">
             {entries.map((e) => (
               <li key={e.id}><i className={`sw ${tone(e.id)}`} /><span className="al-name">{names.get(e.id) ?? e.id}</span><span className="mono">{money3(e.v)} {asset}</span></li>
@@ -44,7 +43,7 @@ export function SettlementPanel({ desk }: { desk: DeskState }) {
       )}
       {links.length > 0 && (
         <p className="small onchain-links">
-          {links.map((l) => <a key={l.txHash} href={l.explorerUrl} target="_blank" rel="noreferrer" title={l.txHash}>{l.label}</a>)}
+          {links.map((l) => <span key={l.txHash}>{shortLabel(l.label)} <a className="mono" href={l.explorerUrl} target="_blank" rel="noreferrer" title={l.label}>{shortAddr(l)}</a></span>)}
         </p>
       )}
       <ul className="receipts">
@@ -66,4 +65,14 @@ export function SettlementPanel({ desk }: { desk: DeskState }) {
       {vault && <p className="muted small vault-note">The pot is held by the DeskVault contract in a test stablecoin. No allocation changes without the desk&apos;s transaction and the risk manager&apos;s signature.</p>}
     </section>
   );
+}
+
+const shortLabel = (l: string): string => {
+  const i = l.indexOf(' deployed');
+  return (i > 0 ? l.slice(0, i) : l.split(' at 0x')[0] ?? l).trim();
+};
+function shortAddr(l: { label: string; txHash: string; explorerUrl: string }): string {
+  const m = /0x[0-9a-fA-F]{40}/.exec(l.label) ?? /0x[0-9a-fA-F]{40}/.exec(l.explorerUrl) ?? /0x[0-9a-fA-F]{8,}/.exec(l.txHash);
+  const a = m ? m[0] : l.txHash;
+  return a.length > 12 ? `${a.slice(0, 6)}\u2026${a.slice(-4)}` : a;
 }

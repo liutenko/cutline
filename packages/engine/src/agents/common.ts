@@ -1,5 +1,5 @@
 import type { AgentId, Instrument, Order, Sym } from '../../../../shared/src/types.ts';
-import { grossExposure, positionValue, usd } from '../risk.ts';
+import { grossExposure, positionValue, topAdverse, usd } from '../risk.ts';
 import type { BrainContext, Candidate } from './types.ts';
 
 /** Each buy tranche is this share of equity. */
@@ -80,18 +80,10 @@ export function sellAll(ctx: BrainContext, agentId: AgentId, symbol: Sym, ration
   return mkOrder(ctx, agentId, symbol, 'sell', Math.min(v, liqCap * 0.95), rationale);
 }
 
+/** Top adverse event probability: full assessments with polarity 'adverse' only (same as the event multiplier). */
 export function maxAdverseProb(ctx: BrainContext): { p: number; claim?: string } {
-  let p = 0;
-  let claim: string | undefined;
-  // Assessments only, like the event multiplier: ranking rows are trading signals, not risk readings.
-  for (const e of ctx.snapshot.eventRisk.filter((x) => x.origin !== 'ranking')) {
-    const a = e.polarity === 'adverse' ? e.cournotProbability : 1 - e.cournotProbability;
-    if (a > p) {
-      p = a;
-      claim = e.claim;
-    }
-  }
-  return { p, claim };
+  const { p, driver } = topAdverse(ctx.snapshot.eventRisk);
+  return { p, claim: driver?.claim };
 }
 
 export const fmtPct = (n: number | undefined) => (n === undefined ? 'n/a' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`);

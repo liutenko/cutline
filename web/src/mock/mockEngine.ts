@@ -126,32 +126,25 @@ class Sim {
       claim, venue: 'Example prediction market', marketId: id, cournotProbability: p, venuePrice: v, divergence: Math.round((p - v) * 100) / 100,
       polarity, live: false, origin: 'ranking', fetchedAt: now - 3 * 3600_000, sources: [],
     });
+    const assess = (claim: string, p: number, polarity: 'adverse' | 'favorable', id: string, req: string, sources: EventRisk['sources']): EventRisk => ({
+      claim, venue: 'Polymarket', marketId: id, marketUrl: `https://example.com/markets/${id}`, cournotProbability: p, venuePrice: p, divergence: 0,
+      polarity, live: false, origin: 'assessment', fetchedAt: now - 3 * 3600_000, requestId: req, sources,
+    });
     return [
       rank('Will a major exchange list a BNB Chain RWA token before 31 Dec 2026?', 0.58, 0.49, 'favorable', 'mock-r1'),
       rank('Will the US Treasury announce new stablecoin rules before 31 Jan 2027?', 0.34, 0.26, 'adverse', 'mock-r2'),
       rank('Will BNB trade above $700 at any point before 31 Dec 2026?', 0.37, 0.31, 'favorable', 'mock-r3'),
-      {
-        claim: 'Will the US announce new tariffs on Chinese electronics before 15 Dec 2026?',
-        venue: 'Example prediction market', marketId: 'mock-tariffs', marketUrl: 'https://example.com/markets/tariffs',
-        cournotProbability: 0.22, venuePrice: 0.21, divergence: 0.01, polarity: 'adverse', live: false,
-        fetchedAt: now - 3 * 3600_000, requestId: 'mock-req-0001',
-        cournotExplanation: 'Mock explanation: recent trade talks reduced the near-term odds of new tariffs.',
-        sources: [
-          { title: 'Trade talks resume with no date for new measures', url: 'https://example.com/news/trade-talks', snippet: 'Negotiators met for a third day without naming a date for any new tariff measures.' },
-          { title: 'Commerce department statement on electronics imports', url: 'https://example.com/gov/electronics' },
-        ],
-      },
-      {
-        claim: 'Will the Fed leave rates unchanged at its December 2026 meeting?',
-        venue: 'Example prediction market', marketId: 'mock-fed', marketUrl: 'https://example.com/markets/fed-dec',
-        cournotProbability: 0.82, venuePrice: 0.76, divergence: 0.06, polarity: 'favorable', live: false,
-        fetchedAt: now - 3 * 3600_000, requestId: 'mock-req-0002',
-        cournotExplanation: 'Mock explanation: inflation prints and committee remarks point to a hold.',
-        sources: [
-          { title: 'Committee minutes signal patience on rates', url: 'https://example.com/fed/minutes' },
-          { title: 'Core inflation edges lower for a third month', url: 'https://example.com/data/cpi' },
-        ],
-      },
+      assess('Will Bitcoin be below $55,000 on 31 Dec 2026?', 0.35, 'adverse', 'mock-btc55', 'mock-req-0001', [
+        { title: 'polymarket', url: 'https://example.com/markets/btc-55k', snippet: 'polymarket latest yes price for Bitcoin below $55,000 on Dec 31 is 0.35' },
+        { title: 'kalshi', url: 'https://example.com/markets/btc-55k-kalshi', snippet: 'Contracts on year-end Bitcoin range trade at 34 cents' },
+        { title: 'deribit', url: 'https://example.com/options/btc', snippet: 'Options skew leans toward downside protection into year end' },
+      ]),
+      assess('Will Bitcoin be below $50,000 on 31 Dec 2026?', 0.21, 'adverse', 'mock-btc50', 'mock-req-0002', [
+        { title: 'polymarket', url: 'https://example.com/markets/btc-50k', snippet: 'polymarket latest yes price for Bitcoin below $50,000 on Dec 31 is 0.21' },
+      ]),
+      assess('Will Ethereum be above $3,000 on 31 Dec 2026?', 0.78, 'favorable', 'mock-eth3k', 'mock-req-0003', [
+        { title: 'polymarket', url: 'https://example.com/markets/eth-3k', snippet: 'polymarket latest yes price for Ethereum above $3,000 on Dec 31 is 0.78' },
+      ]),
     ];
   }
 
@@ -160,8 +153,8 @@ class Sim {
     let worst = 0;
     let wide = false;
     for (const e of ev) {
-      const adverse = e.polarity === 'adverse' ? e.cournotProbability : 1 - e.cournotProbability;
-      worst = Math.max(worst, adverse);
+      if (e.polarity !== 'adverse') continue;
+      worst = Math.max(worst, e.cournotProbability);
       if (Math.abs(e.divergence ?? 0) >= 0.1) wide = true;
     }
     let m = Math.min(1, Math.max(CONFIG.minEventMultiplier, 1 - worst));
@@ -324,17 +317,16 @@ class Sim {
     const ev = this.s.snapshot!.eventRisk.filter((e) => e.origin !== 'ranking');
     if (tick === 14) {
       const a = ev[0]!;
-      a.cournotProbability = 0.45;
-      a.venuePrice = 0.38;
-      a.divergence = 0.07;
+      a.cournotProbability = 0.49;
+      a.venuePrice = 0.49;
+      a.divergence = 0;
       a.live = true;
       a.fetchedAt = Date.now();
-      a.requestId = 'mock-req-0003';
-      a.cournotExplanation = 'Mock explanation: a new customs notice and a senator\'s statement raised the odds of tariffs before the deadline.';
+      a.requestId = 'mock-req-0004';
       a.sources = [
-        { title: 'Customs notice lists electronics categories under review', url: 'https://example.com/news/customs-notice', snippet: 'A notice published this week lists phones and laptops among categories under review.' },
-        { title: 'Senator calls for action before year end', url: 'https://example.com/news/senator' },
-        { title: 'Trade talks stall over export controls', url: 'https://example.com/news/talks-stall' },
+        { title: 'polymarket', url: 'https://example.com/markets/btc-55k', snippet: 'polymarket latest yes price for Bitcoin below $55,000 on Dec 31 is 0.49' },
+        { title: 'kalshi', url: 'https://example.com/markets/btc-55k-kalshi', snippet: 'Year-end Bitcoin range contracts moved to 48 cents after the sell-off' },
+        { title: 'deribit', url: 'https://example.com/options/btc', snippet: 'Put demand rose across December expiries' },
       ];
       this.fg = Math.min(this.fg, 29);
     }
@@ -443,13 +435,13 @@ class Sim {
       }
     } else if (a.agentId === 'event' && this.s.round.tick % 2 === 0) {
       const ev = snap.eventRisk.filter((e) => e.origin !== 'ranking');
-      const adv = ev.find((e) => e.polarity === 'adverse' && (e.divergence ?? 0) >= 0.05);
-      const fav = ev.find((e) => e.polarity === 'favorable' && (e.divergence ?? 0) >= 0.05);
-      if (adv && a.positions.length) {
+      const lead = [...ev].sort((x, y) => adverse(y) - adverse(x))[0]!;
+      const fav = snap.eventRisk.find((e) => e.origin === 'ranking' && e.polarity === 'favorable' && (e.divergence ?? 0) >= 0.05);
+      if (adverse(lead) >= 0.45 && a.positions.length) {
         const p = a.positions[0]!;
-        done(this.submit(a, p.symbol, 'sell', p.qty * this.price(p.symbol), `Cournot has the tariff claim at ${Math.round(adv.cournotProbability * 100)}% against ${Math.round((adv.venuePrice ?? 0) * 100)}% on the venue; cutting to cash.`));
-      } else if (fav && !adv) {
-        done(this.submit(a, 'BNB', 'buy', 3200 + this.r() * 1500, `Cournot has the Fed hold at ${Math.round(fav.cournotProbability * 100)}% against ${Math.round((fav.venuePrice ?? 0) * 100)}% on the venue; adding BNB.`));
+        done(this.submit(a, p.symbol, 'sell', p.qty * this.price(p.symbol), `Cournot puts "${lead.claim.replace(/\?$/, '')}" at ${Math.round(adverse(lead) * 100)}%; cutting to cash.`));
+      } else if (fav && adverse(lead) < 0.45) {
+        done(this.submit(a, 'BNB', 'buy', 3200 + this.r() * 1500, `Cournot is ${Math.round((fav.divergence ?? 0) * 100)} points above the venue on a favorable claim; adding BNB.`));
       }
     }
   }
@@ -615,7 +607,7 @@ class Sim {
 }
 
 function adverse(e: EventRisk): number {
-  return e.polarity === 'adverse' ? e.cournotProbability : 1 - e.cournotProbability;
+  return e.polarity === 'adverse' ? e.cournotProbability : 0;
 }
 
 export function createMockSource(speed = 1): DeskSource {

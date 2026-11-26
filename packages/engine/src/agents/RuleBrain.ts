@@ -182,6 +182,11 @@ const score = (m: { pctChange1h?: number; pctChange24h?: number }) => (m.pctChan
 const DEFENSIVE = /gold|treasur|bond|t-bill|bill/i;
 
 /** Tokenized RWA. Rotates into RWA when fear and greed is low or event risk is high, back to cash otherwise. */
+/** Names the adverse claim behind the top adverse probability (favorable claims are not risk events). */
+export function adverseText(adv: { p: number; claim?: string }): string {
+  return adv.claim ? `the top adverse event, "${adv.claim}", is at ${(adv.p * 100).toFixed(0)}%` : 'no adverse event is loaded';
+}
+
 export class RwaBrain extends RuleBrain {
   private riskOff: boolean | null = null;
   constructor(opts: Partial<RuleBrainOptions> = {}) {
@@ -195,7 +200,7 @@ export class RwaBrain extends RuleBrain {
     const inst = ctx.instruments.find((i) => i.symbol === symbol);
     const defensiveExists = byKind(ctx, 'rwa').some((i) => DEFENSIVE.test(i.name));
     if (defensiveExists && inst && !DEFENSIVE.test(inst.name)) return null;
-    return `risk is still off (fear and greed ${ctx.snapshot.fearGreed ?? 'n/a'}, top adverse event ${(maxAdverseProb(ctx).p * 100).toFixed(0)}%)`;
+    return `risk is still off (fear and greed ${ctx.snapshot.fearGreed ?? 'n/a'}, ${adverseText(maxAdverseProb(ctx))})`;
   }
   protected ideas(ctx: BrainContext): Candidate[] {
     const fg = ctx.snapshot.fearGreed;
@@ -206,7 +211,7 @@ export class RwaBrain extends RuleBrain {
     if (off) this.riskOff = true;
     else if (on) this.riskOff = false;
     else if (this.riskOff === null) this.riskOff = false;
-    const why = `Fear and greed is ${fg ?? 'n/a'} and the top adverse event probability is ${(adv.p * 100).toFixed(0)}%`;
+    const why = `Fear and greed is ${fg ?? 'n/a'} and ${adverseText(adv)}`;
     // In risk-off, prefer defensive RWA (gold, treasuries) over tokenized stocks; fall back to any RWA.
     const allRwa = byKind(ctx, 'rwa');
     const defensive = allRwa.filter((i) => DEFENSIVE.test(i.name));

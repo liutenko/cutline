@@ -34,7 +34,7 @@ Real allocation math: `scale = realAllocationPerAgent / paperAccountUsd`. An age
 | exposure | Desk | buys cannot exceed cash (spot only, no shorts, no leverage) |
 | concentration | Desk | one symbol <= `maxConcentrationPct`% of equity after the order |
 
-`eventMultiplier` (applies to all agents): for each `EventRisk`, `adverseProb = polarity=='adverse' ? p : 1-p` where `p = cournotProbability`. Take the highest `adverseProb` across events. `multiplier = clamp(1 - adverseProb, minEventMultiplier, 1)`. Additionally, if `|divergence| >= 0.10` on any event, multiply by 0.8 (the market and Cournot disagree, so uncertainty is high). Emit a `budget` event whenever the multiplier changes, with a sentence naming the claim and the probability.
+`eventMultiplier` (applies to all agents): take the highest `cournotProbability` among full assessments whose polarity is `adverse` (a bad event for risk assets). `multiplier = clamp(1 - thatProbability, minEventMultiplier, 1)`. Favorable claims never reduce the budget: an unlikely upside event is not a risk event. If there is no adverse assessment the multiplier is 1. Additionally, if `|divergence| >= 0.10` on any assessment, multiply by 0.8 (the market and Cournot disagree, so uncertainty is high). Emit a `budget` event whenever the multiplier changes, with a sentence naming the claim and the probability.
 
 ## Agents
 Each agent has its own key and its own module. A `Brain` interface decides orders from `(snapshot, account)`.
