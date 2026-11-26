@@ -52,17 +52,24 @@ function parseEngineUrl(value) {
 function computeCheckpoints() {
   if (!frames.length) return [];
   const firstFrame = test => frames.findIndex(f => test(f.state));
-  const cut = firstFrame(s => s.agents.some(a => a.status === "cut"));
+  let cut = firstFrame(s => !s.railPending && s.agents.some(a => a.status === "cut" && Number(a.realAllocation) === 0));
+  if (cut < 0) cut = firstFrame(s => s.agents.some(a => a.status === "cut"));
   const cutAgent = cut >= 0 ? frames[cut].state.agents.find(a => a.status === "cut") : null;
   let settle = firstFrame(s => s.round.phase === "settled" && (s.scorecards?.length || 0) > 0);
   if (settle < 0) settle = frames.length - 1;
   return [
     {key:"evaluate", frame:firstFrame(s => s.round.phase === "evaluation"), title:"Paper evaluation", text:"Agents trade on paper accounts."},
-    {key:"fund", frame:firstFrame(s => s.agents.some(a => a.status === "funded")), title:"Agents funded", text:"Qualified agents receive test tokens on BNB Smart Chain testnet."},
+    {key:"fund", frame:firstFrame(s => !s.railPending && s.agents.some(a => a.status === "funded" && Number(a.realAllocation) > 0)), title:"Agents funded", text:"Qualified agents receive test tokens on BNB Smart Chain testnet."},
     {key:"block", frame:firstFrame(s => (s.events || []).some(e => e.type === "decision" && e.decision?.approved === false)), title:"Order blocked", text:"See which checks rejected the order."},
     {key:"cut", frame:cut, title:"Agent cut", text:cutAgent ? `${cutAgent.name} loses its allocation.` : "The risk manager cuts an agent."},
     {key:"settle", frame:settle, title:"Round settled", text:"Review final allocations in Capital."}
   ].filter(c => c.frame >= 0).sort((a,b) => a.frame - b.frame);
+}
+
+// Status changes first; the allocation follows when the transaction lands.
+function allocPending(a, s) {
+  const alloc = Number(a.realAllocation);
+  return Boolean(s?.railPending) && ((a.status === "funded" && alloc === 0) || (a.status === "cut" && alloc > 0));
 }
 
 function currentState() {
@@ -300,7 +307,7 @@ function agentTable(agents, asset) {
           <td class="numeric">${money(a.equityUsd)}</td>
           <td class="numeric ${a.pnlPct >= 0 ? "green" : "red"}">${pct(a.pnlPct)}</td>
           <td class="numeric ${a.drawdownPct >= 6 ? "red" : ""}">${pct(a.drawdownPct)}</td>
-          <td class="numeric">${Number(a.realAllocation).toFixed(3)}</td>
+          <td class="numeric">${Number(a.realAllocation).toFixed(3)}${allocPending(a, currentState()) ? '<span class="alloc-pending">transaction pending</span>' : ""}</td>
         </tr>`;
       }).join("")}</tbody>
     </table>
@@ -395,15 +402,25 @@ function capitalLedger(s, alloc) {
   </section>`;
 }
 
+// Mid-round the vault contract holds only what is not out in the round; count the round's capital at cost.
+function fundAssets(fund) {
+  const a = Number(fund.totalAssets) + (fund.roundActive ? Number(fund.roundPot) : 0);
+  return String(Math.round(a * 1e6) / 1e6);
+}
+function fundSharePrice(fund) {
+  const sh = Number(fund.totalShares);
+  return sh > 0 ? (Number(fundAssets(fund)) / sh).toFixed(6) : "1.000000";
+}
+
 function fundVault(fund) {
   if (!fund) return "";
   const href = safeUrl(fund.explorerUrl);
   return `<section class="surface vault fund-vault" id="depositor-vault" aria-labelledby="fund-title">
     <div class="sectionhead"><h2 class="icon-heading" id="fund-title" tabindex="-1">${lineIcon("protect")}Depositor vault <span class="fund-sub">(DeskFund, testnet)</span></h2>${href ? `<a class="quiet-link" href="${esc(href)}" target="_blank" rel="noopener">View contract on testnet explorer ${arrow}</a>` : ""}</div>
     <dl class="fund-stats">
-      <div><dt>Depositor assets</dt><dd>${esc(fund.totalAssets)} <span class="unit">tUSD</span></dd>${fund.roundActive ? '<p class="fund-note">Excludes capital out in the open round.</p>' : ""}</div>
+      <div><dt>Depositor assets</dt><dd>${esc(fundAssets(fund))} <span class="unit">tUSD</span></dd>${fund.roundActive ? `<p class="fund-note">Includes ${esc(fund.roundPot)} tUSD out in the open round, at cost.</p>` : ""}</div>
       <div><dt>Shares</dt><dd>${esc(fund.totalShares)}</dd></div>
-      <div><dt>Share price</dt><dd>${esc(fund.sharePrice)} <span class="unit">tUSD</span></dd></div>
+      <div><dt>Share price</dt><dd>${esc(fundSharePrice(fund))} <span class="unit">tUSD</span></dd>${fund.roundActive ? '<p class="fund-note">Settles when the round closes.</p>' : ""}</div>
       <div><dt>Loss reserve</dt><dd>${esc(fund.reserve)} <span class="unit">tUSD</span></dd><p class="fund-note">Evaluation fees fill the reserve. It pays before depositors.</p></div>
       <div><dt>Protocol fees</dt><dd>${esc(fund.protocolFees)} <span class="unit">tUSD</span></dd></div>
     </dl>
@@ -550,7 +567,7 @@ function terminal(evidenceOpen) {
     <section class="performance" aria-labelledby="equity-title">
       <div class="performance-top">
         <div class="performance-summary"><div><span class="meta-label">Total paper equity / USD</span><div class="paper-equity">${money(ag.reduce((n,a) => n + a.equityUsd,0))}</div></div>
-          <dl class="summary-context"><div><dt class="meta-label">Funded agents</dt><dd>${ag.filter(a => a.status === "funded").length} <span class="unit">/ ${ag.length}</span></dd></div><div><dt class="meta-label">Risk budget</dt><dd>${m.toFixed(0)}<span class="unit">%</span></dd></div><div><dt class="meta-label">Held by desk</dt><dd>${Number(alloc.desk || 0).toFixed(3)} <span class="unit">${esc(asset)}</span></dd></div></dl>
+          <dl class="summary-context"><div><dt class="meta-label">Funded agents</dt><dd>${ag.filter(a => a.status === "funded").length} <span class="unit">/ ${ag.length}</span></dd></div><div><dt class="meta-label">Risk budget</dt><dd>${m.toFixed(0)}<span class="unit">%</span></dd></div><div><dt class="meta-label">Held by desk</dt><dd>${Number(alloc.desk || 0).toFixed(3)} <span class="unit">${esc(asset)}</span></dd>${s.railPending ? '<span class="alloc-pending">transaction pending</span>' : ""}</div></dl>
         </div>
         <div class="performance-chart"><div class="chart-caption"><h2 id="equity-title" tabindex="-1">Agent paper equity / USD</h2></div>${chart(ag,s.round.tick ?? idx)}<div class="legend chart-legend">${ag.map((a,i) => `<span><i style="--swatch:${colors[i]}"></i>${esc(a.name)}</span>`).join("")}</div></div>
       </div>

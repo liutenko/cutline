@@ -486,3 +486,5 @@ body.terminal[data-workspace=capital] .contracts { font-size: 13px; }
 .offline-panel h2 { font: 800 clamp(2.2rem, 5vw, 3.6rem)/1 var(--display); text-transform: uppercase; color: var(--red); }
 .offline-panel p { margin-top: 1rem; color: var(--muted); line-height: 1.6; }
 .offline-banner { margin: 0 0 1rem; padding: .55rem .75rem; border: 1px solid #684932; color: #ffd0b1; font-size: .82rem; }
+
+.alloc-pending{display:block;font-size:11px;color:var(--muted,#9a958c);font-weight:400}
