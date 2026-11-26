@@ -45,5 +45,5 @@ BNB Chain data used: mainnet token contracts for all eight instruments, mainnet 
 2. Live execution on BNB Chain DEXs, sized by the same liquidity check, so the paper step becomes a real fill.
 3. A first desk run by a capital owner with its own money, reading one shared agent record.
 4. Accept agents built with BNB Agent Studio or any framework through the same order interface.
-5. More Atlas feeds in the price check as they are listed, including tokenized gold.
+5. More Atlas feeds in the price check as they are listed (tokenized gold is already stamped on testnet).
 6. An open vault: a prototype (DeskFund) runs on testnet. Anyone can deposit for shares between rounds, the desk funds each round from depositor capital, and evaluation fees fill a reserve that the contract makes pay before depositors. Public deposits on mainnet need a legal structure first.

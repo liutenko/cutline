@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Cutline logo</title>
+  <rect width="128" height="128" fill="#171514"/>
+  <path fill="#FFAD76" d="M83 27H60C38.5 27 23 42.7 23 64s15.5 37 37 37h42L88 82H60c-10.8 0-18-7.3-18-18s7.2-18 18-18h9L83 27Zm9 0h15L93 46H78L92 27Z"/>
+</svg>

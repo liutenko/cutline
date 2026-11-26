@@ -6,6 +6,8 @@ The cutline is the line an agent must stay above to keep its capital: break a ri
 
 Last updated: 2026-11-26. Built for the BNB Bangkok hackathon (Developer Track, CoinMarketCap x Atlas, Cournot).
 
+**Public site:** https://cutline-desk.vercel.app plays a recording of a real round on BNB Smart Chain testnet (the round funded from the depositor vault, 2026-11-26 13:34 UTC), labelled as a recording. Every transaction on it links to the testnet explorer. A labelled mock round is at `/mock`.
+
 ## What it is
 
 Agents are evaluated on paper accounts at live prices, funded with capital held in an on-chain vault (BNB Smart Chain testnet, test tokens), checked by a risk manager on every order, and cut when they break a rule. Profit is paid out in one on-chain settlement, and each agent gets an on-chain track record that includes how often it was cut. Any capital owner can run a desk with its own money: the rules are code, and the desk is software.
@@ -124,6 +126,15 @@ npm run dev          # http://localhost:5173, talks to the engine on :8787
 ```
 
 Set `VITE_ENGINE_URL` if the engine runs elsewhere. Open `http://localhost:5173/?mock=1` for a labelled mock feed with no engine. Press "Demo controls", then Start. The engine API is `GET /api/state`, `GET /api/events` (SSE) and `POST /api/control`. Set `AUTOSTART=1` to start the round at launch.
+
+**Public site.** `site/` is the static site deployed to Vercel: a landing page and the trading desk, built into one file per page.
+
+```bash
+cd site
+npm run build        # dist/index.html from recordings/run-fund.json, dist/mock.html from the mock round
+```
+
+Open `dist/index.html?engine=http://localhost:8787` to drive a running engine from the same page (start, pause, rogue, shock, close round). Without `?engine=` the page makes no network calls.
 
 **Vault rail (optional).** `RAIL=bnb-testnet-vault` settles on the DeskVault contract on BSC testnet (addresses default to `contracts/deployments/bscTestnet-vault.json`). Needs funded test wallets for the desk and the risk manager (test BNB for gas). Each on-chain step takes about 5 seconds; the engine queues them so trading never waits, and a cut always reaches the chain as its own transaction. `RAIL=local` is the in-memory rail for dev.
 
@@ -250,14 +261,14 @@ The settled round: four vault transactions and the scorecard link.
 
 ### The depositor vault (DeskFund, prototype on testnet)
 
-`contracts/contracts/DeskFund.sol` is an ERC-4626 vault. Depositors put in the test stablecoin and receive shares (CDS). The fund is the `desk` of its own DeskVault, so depositor capital moves into a round and back without passing through any person's wallet. Run the engine with `DESK_FUND=1` to fund rounds from it.
+`contracts/contracts/DeskFund.sol` is an ERC-4626 vault. Depositors put in the test stablecoin and receive vault shares. The fund is the `desk` of its own DeskVault, so depositor capital moves into a round and back without passing through any person's wallet. Run the engine with `DESK_FUND=1` to fund rounds from it.
 
 - Deposits and withdrawals are open only between rounds. During a round the capital is committed.
 - Evaluation fees are paid into the fund: 75 percent to a loss reserve, 25 percent to the protocol.
 - At round close the fund compares what came back with what went out. A shortfall is paid from the reserve first, and depositors bear only what the reserve cannot cover. On a profit, 10 percent goes to the protocol.
 - Every allocation change still needs the risk manager's signature, checked by DeskVault.
 
-What ran on testnet: three test wallets deposited 5, 3 and 2 tUSD (10 CDS), and three evaluation fees of 0.1 tUSD filled a reserve of 0.225 tUSD. One full round was then funded from depositor capital.
+What ran on testnet: three test wallets deposited 5, 3 and 2 tUSD (10 shares), and three evaluation fees of 0.1 tUSD filled a reserve of 0.225 tUSD. One full round was then funded from depositor capital.
 
 | Step | Transaction |
 |---|---|
@@ -296,7 +307,7 @@ Starting proposals, to be tuned once real agent data exists. None of this is imp
 
 | Flow | Terms | Where it goes |
 |---|---|---|
-| Evaluation fee | $40 for a $2,000 slot, as a screening fee | 75 percent to the loss reserve, 25 percent to the protocol |
+| Evaluation fee | $60 for a $2,000 slot (3 percent), as a screening fee | 75 percent to the loss reserve, 25 percent to the protocol |
 | Profit split | Agent keeps 80 percent on a $2,000 slot, 50 percent on $20,000, 30 percent on $100,000 | The rest goes to the vault |
 | Performance fee | 10 percent of the vault's share of profit, only on profit | Protocol |
 | Desk software | A sponsor runs its own desk: setup fee plus 20 percent of that desk's evaluation fees | Protocol |

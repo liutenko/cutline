@@ -1,0 +1,93 @@
+// Builds two self-contained pages:
+//   dist/index.html  the public site, embedding the real recorded round (recordings/run-fund.json)
+//   dist/mock.html   the designer's mock fixture (src/recording.json), clearly labelled as mock data
+// Uses only the Node standard library (Node 18 or later).
+import { createHash } from "node:crypto";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+
+const src = new URL("../src/", import.meta.url);
+const recordings = new URL("../recordings/", import.meta.url);
+const dist = new URL("../dist/", import.meta.url);
+const mimeByExtension = new Map([
+  ["woff2","font/woff2"],
+  ["ttf","font/ttf"],
+  ["jpg","image/jpeg"],
+  ["png","image/png"],
+  ["svg","image/svg+xml"]
+]);
+// Only the mock fixture is pinned: it must stay the designer's exact 35-frame payload.
+const mockDigest = "748106347ef54797d5b903c63f68da90a525a950de9b2d0ced2d04ce53eb0c90";
+
+const [document, base, art, runtime, logos] = await Promise.all(
+  ["index.html","base.css","art-direction.css","desk.js","integrations.html"].map(file =>
+    readFile(new URL(file,src),"utf8")
+  )
+);
+const mockRecording = await readFile(new URL("recording.json",src),"utf8");
+if (createHash("sha256").update(mockRecording).digest("hex") !== mockDigest) {
+  throw new Error("The mock recording differs from the handoff baseline.");
+}
+const realRecording = await readFile(new URL("run-fund.json",recordings),"utf8");
+
+function checkRecording(text, name, expectMock) {
+  const parsed = JSON.parse(text);
+  if (!Array.isArray(parsed.frames) || parsed.frames.length === 0) throw new Error(name + " has no frames.");
+  for (const [i,frame] of parsed.frames.entries()) {
+    if (typeof frame.at !== "number" || !frame.state?.round || !Array.isArray(frame.state.agents)) {
+      throw new Error(name + " frame " + i + " does not match the DeskState recording shape.");
+    }
+  }
+  if (Boolean(parsed.mock) !== expectMock) {
+    throw new Error(name + (expectMock ? " must be marked mock: true." : " is marked mock but is used as the real recording."));
+  }
+  if (!expectMock && !parsed.label) throw new Error(name + " needs a label for the public page.");
+  return parsed;
+}
+
+const joined = [document, base, art, runtime, logos].join("\n");
+const tokenPattern = /@@asset:([a-z0-9.-]+)@@/gi;
+const assetFiles = [...new Set([...joined.matchAll(tokenPattern)].map(match => match[1]))];
+const assets = new Map(await Promise.all(assetFiles.map(async file => {
+  const mime = mimeByExtension.get(file.split(".").at(-1));
+  if (!mime) throw new Error("Unsupported asset format " + file);
+  const bytes = await readFile(new URL("assets/" + file,src));
+  return [file,"data:" + mime + ";base64," + bytes.toString("base64")];
+})));
+
+const inlineAssets = text => text.replace(tokenPattern, (_,file) => assets.get(file));
+const script = inlineAssets(runtime).replace('"@@INTEGRATIONS@@"', () =>
+  JSON.stringify(inlineAssets(logos.trim())).replaceAll("</script", "<\\/script")
+);
+// JSON inside <script type="application/json"> must not close the tag early.
+const embed = text => text.replaceAll("</", "<\\/");
+
+const pages = [
+  {
+    file: "index.html",
+    recording: realRecording,
+    mock: false,
+    description: "Cutline is a prop desk for AI trading agents on BNB Smart Chain testnet. Replay a recorded round with paper trades and test-token capital."
+  },
+  {
+    file: "mock.html",
+    recording: mockRecording,
+    mock: true,
+    description: "Cutline is a prop desk for AI trading agents. This page replays mock data for design review."
+  }
+];
+
+await mkdir(dist,{recursive:true});
+for (const page of pages) {
+  const parsed = checkRecording(page.recording, page.file, page.mock);
+  const slots = {
+    STYLES: inlineAssets(base + "\n" + art),
+    RECORDING: embed(page.recording),
+    RUNTIME: script
+  };
+  const built = inlineAssets(document)
+    .replace("@@DESCRIPTION@@", page.description)
+    .replace(/<!-- (STYLES|RECORDING|RUNTIME) -->/g, (_,slot) => slots[slot]);
+  await writeFile(new URL(page.file,dist),built);
+  const kb = (Buffer.byteLength(built) / 1024).toFixed(0);
+  console.log(`Built dist/${page.file} (${kb} KB) with ${parsed.frames.length} frames: ${parsed.label}${page.mock ? " (mock)" : ""}`);
+}

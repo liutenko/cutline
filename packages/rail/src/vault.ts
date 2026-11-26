@@ -188,7 +188,7 @@ export class VaultRail implements SettlementRail {
   }
 
   close(final: Record<string, string>): Promise<RailReceipt> {
-    return this.serial('close', () => this.doUpdate('close', final, 'final split paid out'));
+    return this.serial('close', () => this.doUpdate('close', final, `Round closed. Final split settled on-chain: ${Object.entries(final).map(([k, v]) => `${k} ${v}`).join(', ')}.`));
   }
 
   /** Reads the vault's on-chain round state. */

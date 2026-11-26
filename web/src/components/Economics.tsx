@@ -19,7 +19,7 @@ export function Economics({ desk }: { desk: DeskState }) {
         ))}
       </dl>
       <p className="muted small">
-        {e ? `A prize pool is spent once. This desk can lose at most ${money3(amount(e.capitalAtRisk))} ${asset} this round.` : 'Desk economics are not reported by the engine yet.'}
+        {e ? `A prize pool is spent once. Capital at risk at the cut limits this round: ${money3(amount(e.capitalAtRisk))} ${asset}. A sudden move can carry a loss past its limit before the cut lands.` : 'Desk economics are not reported by the engine yet.'}
       </p>
     </section>
   );

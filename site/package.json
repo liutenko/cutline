@@ -1,0 +1,13 @@
+{
+  "name": "cutline-site",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Public Cutline site: landing page and trading desk built from a recorded round, with an optional live engine.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
