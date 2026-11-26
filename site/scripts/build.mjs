@@ -38,7 +38,13 @@ if (!slug) {
   await writeFile(slugFile, slug + "\n");
 }
 if (!/^[A-Za-z0-9_-]{8,}$/.test(slug)) throw new Error("The demo slug must be 8 or more URL-safe characters.");
-const liveRecording = JSON.stringify({ live: true, label: "Live desk on BNB Smart Chain testnet", frames: [] });
+// The live page also carries the recorded round: it plays it, labelled as a replay, while the desk is paused.
+const demoParsed = JSON.parse(realRecording);
+const liveRecording = JSON.stringify({
+  ...demoParsed,
+  live: true,
+  label: `Replay of a round recorded on BNB Smart Chain testnet, ${demoParsed.label.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/)?.[0] ?? "earlier"}. The live desk is paused right now.`
+});
 
 function checkRecording(text, name, expectMock) {
   const parsed = JSON.parse(text);
@@ -97,7 +103,7 @@ const pages = [
 
 await mkdir(dist,{recursive:true});
 for (const page of pages) {
-  const parsed = page.live ? { frames: [], label: "live desk" } : checkRecording(page.recording, page.file, page.mock);
+  const parsed = page.live ? { ...checkRecording(page.recording, page.file, false), label: "live desk, with a replay while paused" } : checkRecording(page.recording, page.file, page.mock);
   const slots = {
     STYLES: inlineAssets(base + "\n" + art),
     RECORDING: embed(page.recording),

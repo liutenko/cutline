@@ -2,9 +2,12 @@ const recording = JSON.parse(document.querySelector("#recording").textContent);
 const isMock = recording.mock === true;
 const params = new URLSearchParams(location.search);
 const engineParam = params.get("engine");
-// The public page (recording.live) reads the desk through the site's own /api proxy.
-const isProduct = recording.live === true && engineParam === null;
-const isLive = engineParam !== null || recording.live === true;
+// The public page (recording.live) reads the desk through the site's own /api proxy when the engine answers.
+// When the desk is paused it replays the embedded recorded round instead, labelled as a replay.
+const engineUp = recording.live === true && engineParam === null ? await probeEngine() : false;
+const isProduct = engineUp;
+const pausedReplay = recording.live === true && engineParam === null && !engineUp;
+const isLive = engineParam !== null || isProduct;
 const engineUrl = engineParam !== null ? parseEngineUrl(engineParam) : isProduct ? location.origin : null;
 // Operator controls only with ?key= (kept for this tab, removed from the address bar) or an explicit ?engine=.
 const controlKey = readControlKey();
@@ -44,6 +47,15 @@ const iconPaths = {
 const assetLogos = "@@INTEGRATIONS@@";
 const marketSymbols = ["BNB","BTCB","XAUT","TSLAB"];
 
+async function probeEngine() {
+  try {
+    const response = await fetch("/api/health", {cache:"no-store", signal:AbortSignal.timeout(3500)});
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 function readControlKey() {
   let key = params.get("key") || "";
   try {
@@ -53,7 +65,7 @@ function readControlKey() {
   if (params.has("key")) {
     params.delete("key");
     const q = params.toString();
-    history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
+    window.history.replaceState(null, "", location.pathname + (q ? "?" + q : "") + location.hash);
   }
   return key;
 }
@@ -205,10 +217,11 @@ function frameDelay(i) {
 function scheduleNext() {
   timer = setTimeout(() => {
     if (idx < frames.length - 1) idx++;
-    if (idx >= frames.length - 1) timer = null;
+    else if (pausedReplay) idx = 0;
+    if (idx >= frames.length - 1 && !pausedReplay) timer = null;
     else scheduleNext();
     render();
-  }, frameDelay(idx));
+  }, idx >= frames.length - 1 && pausedReplay ? 6000 : frameDelay(idx));
 }
 
 function play() {
@@ -772,5 +785,8 @@ async function poll() {
   setTimeout(poll, live.online ? (isProduct ? 2500 : 1000) : 3000);
 }
 
+if (pausedReplay && frames.length) idx = 0;
 render();
 if (isLive && engineUrl) poll();
+// The paused public page keeps the replay moving, on a loop.
+if (pausedReplay && frames.length > 1) scheduleNext();

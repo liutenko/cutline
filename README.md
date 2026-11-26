@@ -6,7 +6,7 @@ The cutline is the line an agent must stay above to keep its capital: break a ri
 
 Last updated: 2026-11-26. Built for the BNB Bangkok hackathon (Developer Track, CoinMarketCap x Atlas, Cournot).
 
-**Live desk:** https://cutline-desk.vercel.app shows the desk running now on BNB Smart Chain testnet. Rounds run back to back on depositor capital from the vault: agents are evaluated on paper at live prices, funded, cut when they break a rule, and settled on-chain, with no operator. Every transaction links to the testnet explorer. Trades are paper trades and capital is test tokens.
+**Live desk:** https://cutline-desk.vercel.app shows the desk running now on BNB Smart Chain testnet. Rounds run back to back on depositor capital from the vault: agents are evaluated on paper at live prices, funded, cut when they break a rule, and settled on-chain, with no operator. Every transaction links to the testnet explorer. Trades are paper trades and capital is test tokens. When the desk is paused, the page says so and replays the latest recorded round on a loop, labelled as a replay.
 
 ## What it is
 
@@ -135,7 +135,7 @@ npm run build                                          # dist/index.html (live d
 ENGINE_ORIGIN=http://<engine-host>:8787 node scripts/vercel-output.mjs   # .vercel/output with /api proxied to the engine
 ```
 
-`index.html` reads the desk through the site's own `/api` proxy and shows no controls. The demo page replays a recorded round (`recordings/run-live.json`) with checkpoints and is served only at an unlisted path (`site/.demo-slug`, not committed). Open `dist/index.html?engine=http://localhost:8787` to drive a local engine from the same page; add `?key=<CONTROL_TOKEN>` when the engine is locked.
+`index.html` reads the desk through the site's own `/api` proxy and shows no controls. If `/api/health` does not answer, it plays the embedded recorded round on a loop, labelled as a replay of a recording while the desk is paused. The demo page replays a recorded round (`recordings/run-live.json`) with checkpoints and is served only at an unlisted path (`site/.demo-slug`, not committed). Open `dist/index.html?engine=http://localhost:8787` to drive a local engine from the same page; add `?key=<CONTROL_TOKEN>` when the engine is locked.
 
 **Running the desk unattended.** `AUTOPILOT=1` runs rounds back to back (`ROUND_MINUTES`, default 20, then `REST_MINUTES`, default 2) and never uses the demo controls (rogue, shock). `CONTROL_TOKEN` locks `POST /api/control` behind `Authorization: Bearer <token>`; reads stay public. `HOST=0.0.0.0` exposes the engine (default `127.0.0.1`). `AUTO_CLOSE_STALE=1` lets the vault rail close a round left open by a restart, returning its pot to the desk. For a desk that runs all day, stretch the data refresh windows to stay inside the CoinMarketCap plan (`CMC_QUOTE_TTL_MS`, `CMC_LIQUIDITY_TTL_MS`, `CMC_FEAR_GREED_TTL_MS`) and set the Cournot budget (`COURNOT_MAX_CALLS`, `COURNOT_ASSESS_TTL_MS`, `COURNOT_RANKING_TTL_MS`).
 
