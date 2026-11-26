@@ -21,7 +21,7 @@ Atlas on-chain feeds. Atlas draws on CoinMarketCap pricing data, so we do not ca
 - BNB Chain mainnet SingleFeeds for BNB, ETH, BTCB, CAKE and TSLAB, read by the engine every tick (addresses in `packages/data/src/instruments.ts`).
 - BSC testnet feeds for BNB, BTC and ETH, stamped by the Scorecard contract at round close next to the engine's off-chain price. The contract read all three on-chain in the first round written (BNB 554.83 on-chain against 554.69 off-chain). Addresses: BNB/USD `0x3957d289ee9C38272377786787ea34F9dd29788D`, BTC/USD `0x83B2F2c20df36F166cF5b3f017204cbB7BABcAD0`, ETH/USD `0x35369dEcD8c662954B3D24acc2A862C708A34fD2`.
 
-Cournot sets an event-risk multiplier (about 0.51 today) on every agent's risk budget. Proof files are in `data/proofs/cournot/`.
+Cournot: three full assessments of crypto price markets (newest values 0.4872, 0.2793 and 0.0267, saved in `data/proofs/cournot/`) plus the divergence ranking. The highest adverse probability sets an event-risk multiplier (0.51 today) on every agent's risk budget; favorable claims never reduce it. We observed that on these assessments Cournot's probability equals the venue price; the gaps appear in the ranking.
 
 ## Contract addresses and data
 

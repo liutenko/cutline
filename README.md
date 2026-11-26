@@ -12,6 +12,10 @@ Agents are evaluated on paper accounts at live prices, funded with capital held 
 
 **The trades are paper trades.** Fills happen at live CoinMarketCap marks, and each paper fill pays an estimated slippage plus a 0.25% pool fee. The data and the risk decisions are real. Capital, cut-off, payout and scorecard are on-chain on BNB Smart Chain testnet, with test tokens; mainnet and real funds are roadmap. This is an independent hackathon project. Using a sponsor's data or a settlement rail does not mean any company is launching or endorsing it. Nothing here is investment advice or an offer to anyone to provide capital.
 
+![The dashboard during a real run on live data: the rogue agent is blocked by the liquidity check and then cut after a stress test](docs/img/dashboard-cut.png)
+
+A real run on live data, with capital on BNB Smart Chain testnet (test tokens). The rogue agent is blocked by the liquidity check and cut after a labeled stress test.
+
 ## What is real and what is simulated
 
 | Part | Status |
@@ -19,7 +23,7 @@ Agents are evaluated on paper accounts at live prices, funded with capital held 
 | Fills | Simulated. Paper trades at live marks, with estimated slippage and a 0.25% pool fee |
 | Market data | Real. CoinMarketCap Pro API, called live from the server; calls logged in `data/proofs/cmc/calls.jsonl` |
 | Price check | Real. Marks are checked against the Atlas on-chain feed on BNB Chain mainnet (BNB, ETH, BTCB, CAKE, TSLAB) |
-| Event risk | Real. Two Cournot calls with raw responses saved in `data/proofs/cournot/` |
+| Event risk | Real. Cournot calls with raw responses saved in `data/proofs/cournot/` (three full assessments and two divergence rankings so far) |
 | Risk decisions | Real. Six checks on every order, in `packages/engine/src/risk.ts` |
 | Cut-off logic | Real. Positions closed at mark and the allocation goes back to the desk when a limit is breached |
 | Capital, cut-off and payout | On-chain on BNB Smart Chain testnet, with test tokens (a test stablecoin with no value). Funding an agent, a cut and the payout are each a real testnet transaction. Mainnet and real funds are roadmap |
@@ -49,14 +53,16 @@ Agents are evaluated on paper accounts at live prices, funded with capital held 
 1. **Apply.** Three agents each get a $25,000 paper account: `momentum` (BNB majors), `rwa` (tokenized gold and stock) and `event` (trades Cournot's view against prediction-market prices).
 2. **Evaluate.** An agent trades paper positions at live prices. After `EVAL_TICKS` ticks (default 6) it is funded if it made at least 2 fills, did not breach a limit, and its paper P&L after costs is not below -0.5% of the account (config defaults in `packages/engine/src/config.ts`).
 3. **Fund.** The desk allocates 3 units of a test stablecoin per agent out of a 10 unit pot held by the DeskVault contract on BNB Smart Chain testnet. Funding is a transaction signed by the desk and approved by the risk manager's EIP-712 signature. The allocation tracks the paper account in proportion.
-4. **Check every order.** The risk manager runs six checks. A rejected order never fills.
+4. **Choose and check every order.** With `ANTHROPIC_API_KEY` set, when an agent has two or more candidate trades, Claude (model `claude-haiku-5-5`, official SDK) chooses among those rule-generated candidates or does nothing, and writes the rationale (at most 220 characters). It cannot invent trades. A hard cap (`LLM_MAX_CALLS`, default 150 per process) and a per-agent throttle limit calls, and any error falls back to the rule brain. Without the key the agents are rule-based. Either way, the risk manager checks every order. 
+
+   The risk manager runs six checks:
 
    | Check | Source | Rule |
    |---|---|---|
    | agent-status | Desk | a cut agent cannot trade |
    | liquidity | CoinMarketCap | order is at most 2% of the symbol's BNB Chain DEX liquidity |
    | price-agreement | Atlas | CoinMarketCap and Atlas marks within 50 bps; one source is accepted only for major and RWA instruments; disagreement fails; a stale Atlas price (older than 3,600 s by default) counts as one source |
-   | event-budget | Cournot | gross exposure after the order is at most equity x event multiplier |
+   | event-budget | Cournot | gross exposure after the order is at most equity x event multiplier (set by the highest adverse assessment only) |
    | exposure | Desk | spot only: buys covered by cash, no shorts, no leverage |
    | concentration | Desk | one symbol is at most 40% of equity |
 
@@ -70,7 +76,7 @@ Agents are evaluated on paper accounts at live prices, funded with capital held 
 | BNB Chain | All instruments trade on BNB Chain (BNB, CAKE, BTCB, ETH, tokenized gold XAUT and XAUM, tokenized Tesla stock TSLAB, and one thin token MTHT used to show the liquidity check). The Scorecard contract targets BSC testnet (chain 97). Atlas feeds are read from BNB Chain mainnet | `packages/data/src/instruments.ts`, `contracts/contracts/Scorecard.sol`, `contracts/src/chains.ts` |
 | CoinMarketCap | Pro API: prices, BNB Chain DEX liquidity and volume, fear and greed. The key stays server-side. Every call is logged | `packages/data/src/cmc.ts`, `packages/data/src/provider.ts` |
 | Atlas | On-chain SingleFeed price feeds, read every tick for BNB, ETH, BTCB, CAKE and TSLAB. A second set of Atlas feeds on BSC testnet (BNB, BTC, ETH) is stamped by the Scorecard at round close | `packages/data/src/atlas.ts`, `packages/engine/src/risk.ts`, `contracts/contracts/Scorecard.sol` |
-| Cournot | Official Cournot Intelligence Oracle Skill client, vendored at a pinned commit. Sets the event-risk multiplier and the event agent's regime | `packages/data/src/cournot.ts`, `packages/data/src/divergence.ts`, `packages/engine/src/risk.ts` |
+| Cournot | Official Cournot Intelligence Oracle Skill client, vendored at a pinned commit. Sets the event-risk multiplier (adverse assessments only) and the event agent's regime | `packages/data/src/cournot.ts`, `packages/data/src/divergence.ts`, `packages/engine/src/risk.ts` |
 | DeskVault (settlement) | The pot is held by the DeskVault contract on BNB Smart Chain testnet in a test stablecoin (6 decimals, no value). No allocation changes without the desk's transaction and the risk manager's EIP-712 signature, checked by the contract (versioned, replay-protected, allocations must sum to the pot). Agents sign nothing | `packages/rail/src/vault.ts`, `contracts/contracts/DeskVault.sol` |
 
 ## Quick start
@@ -102,7 +108,7 @@ cd packages/engine
 DATA=live RAIL=local npm start
 ```
 
-Cournot is read from the saved proofs unless `COURNOT_MAX_CALLS` allows a billable live call.
+Cournot is served from the newest saved proof and refreshed in the background (claims every 15 minutes, the ranking every 30) when `COURNOT_API_KEY` is set, within `COURNOT_MAX_CALLS` and the daily cap.
 
 **Replay mode.** Plays a recorded file in a loop. `TICK_MS` sets the speed. The dashboard shows "Replay of live data recorded <time>". Record a file with `npm run record` in `packages/data` (one snapshot per minute), or use any `data/recordings/*.jsonl` file you have.
 
@@ -126,7 +132,7 @@ Set `VITE_ENGINE_URL` if the engine runs elsewhere. Open `http://localhost:5173/
 
 ## Desk memory (optional)
 
-**Unverified against the live service.** After each round the desk writes what every agent did to Living Brain (ChatAndBuild's memory layer), and before the next round it reads each agent's record. An agent with an earlier cut on record starts on probation: risk budget x 0.5, and one more trade is needed to be funded. The module is `packages/memory/`. It is built and tested offline (27 tests) but has not been verified against the live Living Brain service. It is off unless `LIVINGBRAIN_API_KEY` is set.
+**Not verified end to end.** The client was verified against the live Living Brain service for reads (authentication, brain lookup, search). Writes are untested because the account has no prepaid balance. After each round the desk writes what every agent did to Living Brain (ChatAndBuild's memory layer), and before the next round it reads each agent's record. An agent with an earlier cut on record starts on probation: risk budget x 0.5, and one more trade is needed to be funded. The module is `packages/memory/`. It is tested offline (27 tests). It is off unless `LIVINGBRAIN_API_KEY` is set.
 
 ## Configuration
 
@@ -149,7 +155,8 @@ Names and meaning only. Values live in `.env`, which is never committed.
 | `ATLAS_FEEDS` | Optional override of the Atlas feed config (chain id, RPC, addresses) |
 | `ATLAS_MAX_AGE_SEC` | Age after which an Atlas price counts as stale |
 | `PRICE_TOLERANCE_BPS` | Price tolerance for the recorder script |
-| `COURNOT_API_KEY`, `COURNOT_MAX_CALLS`, `COURNOT_CACHE_TTL_MS` | Cournot key for paid calls, live call budget per process (default 0, cache only), proof cache lifetime |
+| `COURNOT_API_KEY`, `COURNOT_MAX_CALLS`, `COURNOT_DAILY_MAX`, `COURNOT_CACHE_TTL_MS` | Cournot key, live call budget per process (default 0, cache only), daily call cap, maximum age of an old proof still served |
+| `COURNOT_ASSESS_TTL_MS`, `COURNOT_RANKING_TTL_MS` | Refresh interval for claim assessments (default 15 min) and the ranking (default 30 min) |
 | `ANTHROPIC_API_KEY`, `LLM`, `LLM_MAX_CALLS` | Optional: lets Claude choose among rule candidates; `LLM=0` turns it off; call cap per process |
 | `LIVINGBRAIN_API_KEY`, `LIVINGBRAIN_SUBJECT_ID` | Optional desk memory: service key and the subject the records are kept under. Memory is off without the key |
 | `DESK_KEY`, `RISK_KEY`, `AGENT_MOMENTUM_KEY`, `AGENT_RWA_KEY`, `AGENT_EVENT_KEY` | Test keys for the desk, the risk manager and the three agents |
@@ -165,8 +172,8 @@ Run on 2026-11-26. All pass.
 
 | Package | Command | Result |
 |---|---|---|
-| Engine | `cd packages/engine && npm test` | 47 passing |
-| Data | `cd packages/data && npm run test:offline` | 14 passing |
+| Engine | `cd packages/engine && npm test` | 50 passing |
+| Data | `cd packages/data && npm run test:offline` | 17 passing |
 | Rail | `cd packages/rail && npm test` (run `npm run compile` in `contracts` first) | 19 passing |
 | Contracts | `cd contracts && npx hardhat test` | 17 passing |
 | Memory | `cd packages/memory && npm run test:offline` | 27 passing |
@@ -179,18 +186,25 @@ Live tests (`npm run test:live` in `packages/data`, `packages/rail` and `package
 
 **2. Where and how it calls Cournot.** Through the official Cournot Intelligence Oracle Skill client, vendored at `packages/data/vendor/cournot-skills` at a pinned commit and run by `packages/data/src/cournot.ts` (probability of one claim) and `packages/data/src/divergence.ts` (the divergence ranking). Each call's raw response is saved under `data/proofs/cournot/`. Probabilities are never mocked or hardcoded. A call is made only when no proof is newer than the cache lifetime and the live call budget allows it.
 
-**3. How the probability drives a decision.** The claim is "Bitcoin price below $55,000 at any time before 2027-01-01 05:00 UTC", tagged adverse for risk assets by our configuration. Cournot returned a probability of 0.4862, with a venue price of 0.4862. The engine computes `multiplier = clamp(1 - adverse probability, 0.25, 1)`, which is 1 - 0.4862 = 0.5138, rounded to 0.51. The multiplier scales every agent's risk budget: gross exposure after an order must stay within equity x 100% x 0.51, otherwise the `event-budget` check rejects the order. If any claim shows a gap of 0.10 or more between Cournot and its venue, the multiplier is multiplied by 0.8 again (`eventMultiplier` in `packages/engine/src/risk.ts`). The second call, the divergence ranking, returned 100 rows; the polarity rules in `packages/data/src/polarity.ts` classify 13 of them as clearly adverse (10) or favorable (3) for crypto. These rows give the `event` agent its regime (risk-off, trend or range) and appear in the dashboard. They do not change the multiplier, because they carry no per-claim evidence.
+**3. How the probability drives a decision.** Three full assessments are saved, all crypto price markets: "Bitcoin price below $55,000 at any time before 2027-01-01 05:00 UTC" (adverse), "Bitcoin price below $50,000 at any time before 2027-01-01 05:00 UTC" (adverse) and "Ethereum price above $3,000 at any time before 2027-01-01 05:00 UTC" (favorable). The polarity is set by our configuration, not by Cournot. The newest values (2026-11-26 07:34 UTC) are 0.4872, 0.2793 and 0.0267. Only full assessments with adverse polarity set the event multiplier: `multiplier = clamp(1 - highest adverse probability, 0.25, 1)`. The highest adverse probability is 0.4872, so the multiplier is 1 - 0.4872 = 0.5128, rounded to 0.51. Favorable claims never reduce the budget. The multiplier scales every agent's risk budget: gross exposure after an order must stay within equity x 100% x 0.51, otherwise the `event-budget` check rejects the order. If any assessment shows a gap of 0.10 or more between Cournot and its venue, the multiplier is multiplied by 0.8 again (`eventMultiplier` and `topAdverse` in `packages/engine/src/risk.ts`).
 
-**4. Where users see the claim and evidence.** The "Event risk, from Cournot" panel on the dashboard (`web/src/components/EventRisk.tsx`) shows the exact claim, Cournot's probability, the venue price, the divergence, the sources as returned, and whether the call was live or read from the proof cache. The panel header shows the current multiplier (risk budgets at 51%). Each order on the order tape carries its six checks, including `event-budget` with the numbers. The engine also emits a `budget` event, with a sentence naming the claim and probability, whenever the multiplier changes (`GET /api/events`).
+What we observed: on all three assessments Cournot's probability equals the venue price. The gaps appear in the divergence ranking. The newest ranking returned 100 rows; the polarity rules in `packages/data/src/polarity.ts` classify 14 of them as clearly adverse (11) or favorable (3) for crypto. These rows give the `event` agent its regime (risk-off, trend or range) and appear in the dashboard. They do not change the multiplier, because they carry no per-claim evidence.
 
-**5. Proof of a successful call.**
+The engine refreshes the assessments in the background with caps: each claim at most every 15 minutes and the ranking at most every 30 minutes (`COURNOT_ASSESS_TTL_MS`, `COURNOT_RANKING_TTL_MS`). The key has a quota of 2,000 calls.
+
+**4. Where users see the claim and evidence.** The "Event risk, from Cournot" panel on the dashboard (`web/src/components/EventRisk.tsx`) shows the exact claim, Cournot's probability, the venue price, the divergence, the sources as returned, and whether the call was live or read from the proof cache. The panel header shows the current multiplier (risk budgets at 51%) and the lead adverse claim. Each order on the order tape carries its six checks, including `event-budget` with the numbers. The engine also emits a `budget` event, with a sentence naming the claim and probability, whenever the multiplier changes (`GET /api/events`).
+
+**5. Proof of a successful call.** `npm run cournot:proofs` in `packages/data` lists every saved proof.
 
 | Proof | File | Key values |
 |---|---|---|
-| Assessment | `data/proofs/cournot/20261126T062318Z-bitcoin-price-below-55-000-at-any-time-before-2027-01-01-05-.json` | HTTP 200, `code` 0 "Success", probability 0.4862, market id 1341, five sources (polymarket, kalshi, binance, venues, deribit), fetched 2026-11-26 06:23 UTC |
-| Divergence ranking | `data/proofs/cournot/20261126T062932Z-divergence-ranking.json` | HTTP 200, 100 rows requested and returned |
+| Assessment, adverse | `data/proofs/cournot/20261126T073453Z-bitcoin-price-below-55-000-at-any-time-before-2027-01-01-05-.json` | HTTP 200, `code` 0 "Success", probability 0.4872, venue price 0.4872, market id 1341, five sources (polymarket, kalshi, binance, venues, deribit), fetched 2026-11-26 07:34 UTC |
+| Assessment, adverse | `data/proofs/cournot/20261126T073455Z-bitcoin-price-below-50-000-at-any-time-before-2027-01-01-05-.json` | probability 0.2793, venue price 0.2793, five sources |
+| Assessment, favorable | `data/proofs/cournot/20261126T073456Z-ethereum-price-above-3-000-at-any-time-before-2027-01-01-05-.json` | probability 0.0267, venue price 0.0267, five sources |
+| Divergence ranking | `data/proofs/cournot/20261126T073458Z-divergence-ranking.json` | HTTP 200, 100 rows, 14 classified |
+| Earlier assessment | `data/proofs/cournot/20261126T062318Z-bitcoin-price-below-55-000-at-any-time-before-2027-01-01-05-.json` | probability 0.4862 at 06:23 UTC, free quota call |
 
-Billing footer of the assessment, as returned: `billing: "free_quota"`, `charged: false`, `free_quota: { total: 3, used: 1, remaining: 2 }`, `x402: null`. The footer of the ranking call shows `used: 2, remaining: 1`. The caller IP is redacted in both files. The response carried no separate request ID, so the saved raw response, its timestamp and the client commit (`6484146d8a9414f36233087b13f7ed3f4577482a`) are the proof of the call.
+Billing footer of the $50,000 assessment, as returned: `billing: "api_key"`, `charged: false`, `api_key_quota: { total: 2000, used: 1, remaining: 1999 }`, `x402: null`. The $55,000 assessment shows `billing: "free_quota"`, `charged: false`, `free_quota: { total: 3, used: 3, remaining: 0 }`. The caller IP is redacted in every file. The responses carry no separate request ID, so the saved raw response, its timestamp and the client commit (`6484146d8a9414f36233087b13f7ed3f4577482a`) are the proof of each call.
 
 ## CoinMarketCap and Atlas
 
@@ -236,6 +250,10 @@ A full round driven by the engine on live market data, on BNB Smart Chain testne
 | Close with the final split | [`0xe6847d27c6f2c0c9787470803c70b452bfe48aa8bb53d6b73734bd46a2a7d45b`](https://testnet.bscscan.com/tx/0xe6847d27c6f2c0c9787470803c70b452bfe48aa8bb53d6b73734bd46a2a7d45b) |
 | Scorecard for that round | [`0x338777a64b590e8469b15890ea286d7a15dbf0d20f77c00ad10e129500c7aea8`](https://testnet.bscscan.com/tx/0x338777a64b590e8469b15890ea286d7a15dbf0d20f77c00ad10e129500c7aea8) |
 
+![The dashboard after the round settled, with the vault transactions and the scorecard link](docs/img/dashboard-settled.png)
+
+The settled round: four vault transactions and the scorecard link.
+
 ## Roadmap
 
 1. **Hackathon build.** Three agents, six checks, paper fills with costs, on-chain vault settlement on testnet, Scorecard contract.
@@ -256,6 +274,7 @@ Where this sits: exchange-run prop programs exist for human traders, and they ar
 
 ## Limitations and honesty notes
 
+- The model layer only picks among rule-generated candidates and writes the rationale. It does not invent trades, and the risk manager checks every order whether or not it is on.
 - Fills are paper. The desk is the counterparty to paper profit and pays winners from its own pot. Live execution on DEXs is not built.
 - Capital moves on BNB Smart Chain testnet with test tokens only. Mainnet and real funds are roadmap.
 - One process holds the desk and risk manager keys in this demo. In production the risk manager would sign in its own process.
@@ -263,7 +282,7 @@ Where this sits: exchange-run prop programs exist for human traders, and they ar
 - Atlas and CoinMarketCap are not independent. Atlas draws on CoinMarketCap pricing, so the check catches stale or broken feeds and mark errors, not a shared upstream error.
 - The Scorecard is on testnet only. The round written so far came from a run on live data with paper trades.
 - The evaluation bar is low so a round fits in a demo (6 ticks, 2 fills, P&L not below -0.5%). A production bar would add a profit target, a minimum number of trades and a minimum number of days.
-- Event risk comes from one fully assessed claim. Cournot's free quota for this project's network address is nearly used (one call left as of the saved proofs). More calls need a paid key.
+- Event risk comes from three assessed claims, all crypto price markets, and only the adverse ones set the multiplier. On these assessments Cournot's probability equals the venue price, so the multiplier tracks the market. The key has a quota of 2,000 calls.
 - The stress-test control applies a labelled synthetic price shock. It is a demo tool and is shown as simulated.
 - Nothing here is investment advice or an offer of capital.
 
