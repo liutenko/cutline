@@ -417,7 +417,7 @@ function vaultWallet() {
     </dl>
     ${open ? "" : '<p class="beta-wait" role="status">A round is running. Deposits and withdrawals open when it settles. Rounds last about 20 minutes, and this page checks again every 20 seconds.</p>'}
     <form class="beta-form beta-inline" data-beta-form="deposit" novalidate>
-      <label class="beta-field"><span>Amount to deposit</span><input type="text" inputmode="decimal" data-beta-field="amount" value="${esc(beta.amount)}" placeholder="5" autocomplete="off" ${open && !beta.busy ? "" : "disabled"}></label>
+      <label class="beta-field"><span>Amount to deposit</span><input type="text" inputmode="decimal" data-beta-field="amount" value="${esc(beta.amount)}" placeholder="5" autocomplete="off" ${beta.busy ? "disabled" : ""}></label>
       <button class="beta-button" type="submit" ${open && !beta.busy ? "" : "disabled"}>Deposit test tokens ${arrow}</button>
     </form>
     <div class="beta-actions">
@@ -491,7 +491,7 @@ document.addEventListener("submit", event => {
   if (!form) return;
   event.preventDefault();
   if (form.dataset.betaForm === "apply") submitApplication();
-  else if (form.dataset.betaForm === "deposit") vaultDeposit();
+  else if (form.dataset.betaForm === "deposit" && !form.querySelector("button[type=submit]")?.disabled) vaultDeposit();
 });
 document.addEventListener("click", event => {
   const control = event.target.closest?.("[data-beta]");
