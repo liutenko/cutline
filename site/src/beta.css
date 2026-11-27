@@ -112,3 +112,4 @@
   .stat-word { font-size: 22px; }
   .hero-actions > a { width: 100%; justify-content: space-between; }
 }
+.beta-inline-link { background: none; border: 0; padding: 0; margin-left: 6px; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

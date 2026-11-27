@@ -24,6 +24,7 @@ const beta = {
   wallet: null, walletError: "",
   tx: null, busy: false,
   amount: "",
+  queued: null,
   form: {name: "", markets: "", orders: "REST API", wallet: "", link: "", notes: ""},
   formError: "", formSent: false
 };
@@ -240,6 +241,43 @@ async function vaultDeposit() {
   render();
 }
 
+// Deposits mint shares at the settled price, so the contract only takes them between rounds. During a
+// round the page queues the amount: it asks for the approval now, and sends the deposit itself when the
+// round settles, as long as this page stays open.
+const vaultOpen = () => beta.fund ? !beta.fund.roundActive : Boolean(beta.wallet?.open);
+
+async function vaultQueue() {
+  if (beta.busy || !beta.wallet) return;
+  const units = toUnits(beta.amount, 6);
+  if (units === null || units <= 0n) { beta.tx = {error: "Enter an amount of test tokens, for example 5."}; return render(); }
+  if (units > (beta.wallet.tokens ?? 0n)) { beta.tx = {error: `This wallet holds ${fromUnits(beta.wallet.tokens ?? 0n, 6)} test tokens.`}; return render(); }
+  beta.busy = true;
+  try {
+    if ((beta.wallet.allowance ?? 0n) < units) await walletSend(BETA.token, "0x095ea7b3" + abiAddr(BETA.fund) + abiWord(units), "Approval");
+    beta.queued = beta.amount;
+    beta.tx = null;
+  } catch (error) { beta.tx = walletFailure(error); }
+  beta.busy = false;
+  await walletRefresh().catch(() => {});
+  render();
+}
+
+async function vaultQueueCheck() {
+  if (!beta.queued || beta.busy || !beta.wallet || !vaultOpen()) return;
+  const amount = beta.queued;
+  beta.queued = null;
+  beta.amount = amount;
+  await vaultDeposit();
+  if (beta.tx?.error) {
+    await loadFund().catch(() => {});
+    if (!vaultOpen()) {
+      beta.queued = amount;
+      beta.tx = {error: "The next round started before the deposit went through. It stays queued for the one after."};
+      render();
+    }
+  }
+}
+
 async function vaultWithdraw() {
   if (beta.busy || !beta.wallet || !(beta.wallet.shares > 0n)) return;
   beta.busy = true;
@@ -395,6 +433,13 @@ function agentsPage() {
 }
 
 // ---------- Vault page ----------
+// Mid-round the contract's share value leaves out the capital out in the open round, so count it at cost,
+// the same way the Depositor assets figure does.
+function positionValue(w, f) {
+  if (!f?.roundActive || !(f.shares > 0n) || !(w.shares > 0n)) return w.value ?? 0n;
+  return w.shares * fundTotal(f) / f.shares;
+}
+
 function vaultWallet() {
   const w = beta.wallet;
   const f = beta.fund;
@@ -413,12 +458,14 @@ function vaultWallet() {
   return `<dl class="fund-stats beta-position">
       <div><dt>Wallet</dt><dd class="mono">${esc(shortAddr(w.addr))}</dd></div>
       <div><dt>Test tokens</dt><dd>${fromUnits(w.tokens ?? 0n, 6)} <span class="unit">tUSD</span></dd></div>
-      <div><dt>Your position</dt><dd>${fromUnits(w.value ?? 0n, 6)} <span class="unit">tUSD</span></dd><p class="fund-note">The current value of your vault shares.</p></div>
+      <div><dt>Your position</dt><dd>${fromUnits(positionValue(w, f), 6)} <span class="unit">tUSD</span></dd><p class="fund-note">${f?.roundActive ? "The value of your vault shares, counting the open round at cost." : "The current value of your vault shares."}</p></div>
     </dl>
-    ${open ? "" : '<p class="beta-wait" role="status">A round is running. Deposits and withdrawals open when it settles. Rounds last about 20 minutes, and this page checks again every 20 seconds.</p>'}
+    ${beta.queued
+      ? `<p class="beta-wait" role="status">Queued: ${esc(beta.queued)} test tokens go into the vault when this round settles. Keep this page open; your wallet asks you to confirm the deposit then. <button class="text-button beta-inline-link" type="button" data-beta="unqueue">Cancel</button></p>`
+      : open ? "" : '<p class="beta-wait" role="status">A round is running. You can queue a deposit now, and it goes in when the round settles. Withdrawals open then too. Rounds last about 20 minutes.</p>'}
     <form class="beta-form beta-inline" data-beta-form="deposit" novalidate>
       <label class="beta-field"><span>Amount to deposit</span><input type="text" inputmode="decimal" data-beta-field="amount" value="${esc(beta.amount)}" placeholder="5" autocomplete="off" ${beta.busy ? "disabled" : ""}></label>
-      <button class="beta-button" type="submit" ${open && !beta.busy ? "" : "disabled"}>Deposit test tokens ${arrow}</button>
+      <button class="beta-button" type="submit" ${beta.busy || (beta.queued && !open) ? "disabled" : ""}>${open ? "Deposit test tokens" : "Queue for next round"} ${arrow}</button>
     </form>
     <div class="beta-actions">
       <button class="quiet-link text-button" type="button" data-beta="withdraw" ${open && !beta.busy && (w.shares ?? 0n) > 0n ? "" : "disabled"}>Withdraw my position ${arrow}</button>
@@ -444,7 +491,7 @@ function vaultPage() {
         ${stat("Depositor assets", `${fromUnits(fundTotal(f), 6)} <span class="unit">tUSD</span>`, f.roundActive ? `Includes ${fromUnits(f.roundPot, 6)} tUSD out in the open round, at cost.` : "")}
         ${stat("Share price", `${fundPrice(f)} <span class="unit">tUSD</span>`, f.roundActive ? "Settles when the round closes." : "")}
         ${stat("Loss reserve", `${fromUnits(f.reserve, 6)} <span class="unit">tUSD</span>`, "Pays before depositors do.")}
-        ${stat("Status", `<span class="stat-word">${f.roundActive ? "Round running" : "Between rounds"}</span>`, f.roundActive ? "Deposits open when it settles." : "Deposits and withdrawals are open.")}
+        ${stat("Status", `<span class="stat-word">${f.roundActive ? "Round running" : "Between rounds"}</span>`, f.roundActive ? "Deposits queue for the next round." : "Deposits and withdrawals are open.")}
       </dl>` : '<p class="source-note" role="status">Reading the vault contract.</p>'}
       <p class="source-note">Read live from the vault contract on BNB Smart Chain testnet.</p>
     </section>
@@ -459,7 +506,7 @@ function vaultPage() {
         <h2 class="section-title" id="vault-how-title">How it works</h2>
         <ul class="beta-list">
           <li><b>One pot.</b> Your deposit joins the vault. At each round, the vault funds every agent that qualified.</li>
-          <li><b>Between rounds only.</b> Deposits and withdrawals happen while no round is running.</li>
+          <li><b>In between rounds.</b> Deposits and withdrawals go through while no round is running. During a round, this page queues your deposit for the next one.</li>
           <li><b>The reserve goes first.</b> Evaluation fees fill a loss reserve. A loss is taken from the reserve before it reaches depositors.</li>
           <li><b>What this beta is.</b> Trades are paper trades, so today the vault's value changes only if a profitable agent is paid.</li>
           <li><b>What this beta is not.</b> Test tokens have no value. Deposits with real money need a legal structure and are not open.</li>
@@ -491,24 +538,26 @@ document.addEventListener("submit", event => {
   if (!form) return;
   event.preventDefault();
   if (form.dataset.betaForm === "apply") submitApplication();
-  else if (form.dataset.betaForm === "deposit" && !form.querySelector("button[type=submit]")?.disabled) vaultDeposit();
+  else if (form.dataset.betaForm === "deposit" && !form.querySelector("button[type=submit]")?.disabled) (vaultOpen() ? vaultDeposit() : vaultQueue());
 });
 document.addEventListener("click", event => {
   const control = event.target.closest?.("[data-beta]");
   if (!control || control.disabled) return;
   if (control.dataset.beta === "connect") walletConnect();
   else if (control.dataset.beta === "withdraw") vaultWithdraw();
+  else if (control.dataset.beta === "unqueue") { beta.queued = null; render(); }
 });
 
 function betaStart() {
   Promise.all([loadAgents(), loadFund()]).then(betaRender);
   loadApplications().then(betaRender);
   setInterval(async () => {
-    if (page !== "vault" || beta.busy || document.hidden) return;
+    if (page !== "vault" || beta.busy || (document.hidden && !beta.queued)) return;
     await loadFund();
     if (beta.wallet) await walletRefresh().catch(() => {});
+    if (beta.queued && vaultOpen()) return vaultQueueCheck();
     betaRender();
-  }, 20000);
+  }, 10000);
   window.ethereum?.on?.("accountsChanged", accounts => {
     beta.wallet = accounts[0] ? {addr: accounts[0]} : null;
     beta.tx = null;
