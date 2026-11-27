@@ -231,7 +231,7 @@ Billing footer of the $50,000 assessment, as returned: `billing: "api_key"`, `ch
 | Feed set | Chain | Used for |
 |---|---|---|
 | SingleFeed for BNB, CAKE, BTCB, ETH, TSLAB (addresses in `packages/data/src/instruments.ts`) | BNB Chain mainnet | Read by the engine every tick for the price check |
-| SingleFeed XAU/USD for tokenized gold XAUT (Atlas feed 1189, `0xb3c87f255ce00b2692dc0eaf3e5985fbe2489764`, set up by Atlas for this hackathon; push every 300 s or on a 2% move) | BSC testnet | Read by the engine every tick for the XAUT price check, and stamped by the Scorecard at round close next to the engine's off-chain price. XAUM and MTHT have no Atlas feed, so they are priced by CoinMarketCap alone |
+| SingleFeed XAU/USD for tokenized gold XAUT and XAUM (Atlas feed 1189, `0xb3c87f255ce00b2692dc0eaf3e5985fbe2489764`, set up by Atlas for this hackathon; push every 300 s or on a 2% move) | BSC testnet | Read by the engine every tick for the XAUT and XAUM price checks (both tokens are backed by one troy ounce of gold), and stamped by the Scorecard at round close next to the engine's off-chain price. MTHT has no Atlas feed, so it is priced by CoinMarketCap alone |
 | Feeds for BNB, BTC, ETH and XAUT (names in `SCORECARD_FEEDS`) | BSC testnet | Read on-chain by the Scorecard at round close and stamped next to the engine's off-chain price. Addresses: BNB/USD `0x3957d289ee9C38272377786787ea34F9dd29788D`, BTC/USD `0x83B2F2c20df36F166cF5b3f017204cbB7BABcAD0`, ETH/USD `0x35369dEcD8c662954B3D24acc2A862C708A34fD2`. In the first round written, BNB read 554.83 on-chain against 554.69 off-chain |
 
 ## Deployed contracts

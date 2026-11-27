@@ -54,10 +54,12 @@ export function parseAtlasConfig(raw: string | undefined): AtlasConfig | undefin
 
 /**
  * Atlas push feeds on BNB Smart Chain testnet (chain 97), used for symbols with no mainnet feed.
- * XAUT: XAUt/USD, Atlas feed 1189 (atlasoracle.io/feeds/1189), set up by Atlas for the hackathon.
- * Verified with eth_call: description() "SingleFeed XAU/USD", 18 decimals.
+ * Gold: XAU/USD, Atlas feed 1189 (atlasoracle.io/feeds/1189), set up by Atlas for the hackathon.
+ * Verified with eth_call: description() "SingleFeed XAU/USD", 18 decimals. XAUT and XAUM are each backed by one
+ * troy ounce of gold, so both are checked against the same gold price.
  */
-export const ATLAS_TESTNET_FEEDS: Record<string, Hex> = { XAUT: '0xb3c87f255ce00b2692dc0eaf3e5985fbe2489764' };
+const ATLAS_XAU_USD_TESTNET: Hex = '0xb3c87f255ce00b2692dc0eaf3e5985fbe2489764';
+export const ATLAS_TESTNET_FEEDS: Record<string, Hex> = { XAUT: ATLAS_XAU_USD_TESTNET, XAUM: ATLAS_XAU_USD_TESTNET };
 
 /**
  * Config precedence: ATLAS_FEEDS env, else the atlasFeed fields on INSTRUMENTS read from BNB Smart Chain mainnet
