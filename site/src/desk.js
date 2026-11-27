@@ -451,28 +451,12 @@ function capitalLedger(s, alloc) {
 }
 
 // Mid-round the vault contract holds only what is not out in the round; count the round's capital at cost.
-function fundAssets(fund) {
-  const a = Number(fund.totalAssets) + (fund.roundActive ? Number(fund.roundPot) : 0);
-  return String(Math.round(a * 1e6) / 1e6);
-}
-function fundSharePrice(fund) {
-  const sh = Number(fund.totalShares);
-  return sh > 0 ? (Number(fundAssets(fund)) / sh).toFixed(6) : "1.000000";
-}
-
+// The Vault page is the one place for the depositor vault (live figures, deposits, withdrawals), so the desk links to it.
 function fundVault(fund) {
   if (!fund) return "";
-  const href = safeUrl(fund.explorerUrl);
   return `<section class="surface vault fund-vault" id="depositor-vault" aria-labelledby="fund-title">
-    <div class="sectionhead"><h2 class="icon-heading" id="fund-title" tabindex="-1">${lineIcon("protect")}Depositor vault <span class="fund-sub">(DeskFund, testnet)</span></h2>${href ? `<a class="quiet-link" href="${esc(href)}" target="_blank" rel="noopener">View contract on testnet explorer ${arrow}</a>` : ""}</div>
-    <dl class="fund-stats">
-      <div><dt>Depositor assets</dt><dd>${esc(fundAssets(fund))} <span class="unit">tUSD</span></dd>${fund.roundActive ? `<p class="fund-note">Includes ${esc(fund.roundPot)} tUSD out in the open round, at cost.</p>` : ""}</div>
-      <div><dt>Shares</dt><dd>${esc(fund.totalShares)}</dd></div>
-      <div><dt>Share price</dt><dd>${esc(fundSharePrice(fund))} <span class="unit">tUSD</span></dd>${fund.roundActive ? '<p class="fund-note">Settles when the round closes.</p>' : ""}</div>
-      <div><dt>Loss reserve</dt><dd>${esc(fund.reserve)} <span class="unit">tUSD</span></dd><p class="fund-note">Evaluation fees fill the reserve. It pays before depositors.</p></div>
-      <div><dt>Protocol fees</dt><dd>${esc(fund.protocolFees)} <span class="unit">tUSD</span></dd></div>
-    </dl>
-    ${fund.roundActive ? `<p class="fund-round">Capital in this round: <b>${esc(fund.roundPot)} tUSD</b></p>` : ""}
+    <div class="sectionhead"><h2 class="icon-heading" id="fund-title" tabindex="-1">${lineIcon("protect")}Depositor vault</h2><a class="quiet-link" href="#vault" data-page="vault">Open the Vault page ${arrow}</a></div>
+    <p class="source-note">The desk funds each round from the depositor vault on BNB Smart Chain testnet. Its live figures, deposits and withdrawals are on the Vault page.</p>
   </section>`;
 }
 
